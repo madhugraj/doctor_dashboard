@@ -594,13 +594,24 @@ class DoctorAssistantAgent {
       return this.buildResponse({ session, documentId, assistantMessage, refused: false });
     }
 
-    const externalResult = classification.needsExternal
-      ? await this.externalAgent.execute({ query: executionMessage, classification, internalEvidence })
-      : { success: true, data: { evidence: [], source_class: "internal" } };
-    const externalEvidence = externalResult.data.evidence || [];
-    const externalErrorType = externalResult.data.error_type || null;
-    const externalResolution = externalResult.data.resolution || null;
-    this.logExternalEvidence(trace, classification, externalEvidence, externalResult.data);
+    const externalEvidence = [];
+    const externalResolution = null;
+    if (classification.needsExternal) {
+      this.pushTrace(
+        trace,
+        "external_search",
+        "External Search",
+        useGeminiWebSearch ? "ok" : "blocked",
+        useGeminiWebSearch
+          ? "External medical search is routed through Gemini grounded web search only."
+          : "External medical search is blocked until Gemini grounded web search is available for this turn.",
+        {
+          provider: "gemini_web",
+        }
+      );
+    } else {
+      this.logExternalEvidence(trace, classification, externalEvidence, { evidence: [] });
+    }
 
     const safety = await this.safetyAgent.execute({
       classification,
@@ -608,11 +619,8 @@ class DoctorAssistantAgent {
       externalEvidence,
     });
     this.logSafety(trace, safety.data);
-    const allowResolvedDrugFallback =
-      classification.intent === "drug_safety" &&
-      !externalEvidence.length &&
-      Boolean(externalResolution?.generic_name || externalResolution?.normalized_display);
-    const allowExternalAnswerDespiteLowSafety = classification.needsExternal && (externalEvidence.length || useGeminiWebSearch);
+    const allowResolvedDrugFallback = false;
+    const allowExternalAnswerDespiteLowSafety = classification.needsExternal && useGeminiWebSearch;
 
     let answerPayload;
     let traceProvider = "rule_engine";
@@ -624,25 +632,17 @@ class DoctorAssistantAgent {
       };
       traceProvider = "rule_engine";
       this.pushTrace(trace, "comparison", "Medication Comparison", "ok", "Returned the local medication comparison fallback because external evidence was unavailable.");
-    } else if (classification.needsExternal && !externalEvidence.length && !useGeminiWebSearch) {
-      const resolvedSummary =
-        externalResolution?.generic_name || externalResolution?.normalized_display
-          ? ` I identified the medication as ${externalResolution.generic_name || externalResolution.normalized_display}, but I could not retrieve a reliable external fact for this question right now.`
-          : "";
-      const failureReason =
-        externalErrorType === "no_results"
-          ? "I searched approved external medical sources but did not find a reliable answer for that question."
-          : "I tried approved external medical sources, but the external search is unavailable right now.";
-
+    } else if (classification.needsExternal && !useGeminiWebSearch) {
       answerPayload = {
-        answer: `${failureReason}${resolvedSummary}`,
+        answer: "External medical answers in this build require Gemini grounded web search for this turn.",
         citations: [],
         source_class: "external",
+        llm_provider: "gemini_unavailable",
         refused_override: false,
         confidence_override: 60,
         confidence_label_override: "low",
       };
-      traceProvider = "policy_fallback";
+      traceProvider = "gemini_unavailable";
     } else if (safety.data.refusal.refused && !allowResolvedDrugFallback && !allowExternalAnswerDespiteLowSafety) {
       answerPayload = {
         answer: safety.data.refusal.reason,
@@ -657,7 +657,7 @@ class DoctorAssistantAgent {
           classification,
           internalEvidence: classification.needsExternal ? [] : internalEvidence,
           externalEvidence,
-          externalMeta: { resolution: externalResolution },
+          externalMeta: null,
           chatHistory: session.messages,
           externalComposer: useGeminiWebSearch
             ? "gemini_web"

@@ -74,7 +74,7 @@ describe("DoctorAssistantAgent chat fallbacks", () => {
     expect(result.data.answer).toContain("I can search approved medical sources");
   });
 
-  it("returns a low-confidence external fallback instead of refusing when external search has no result", async () => {
+  it("does not use the external API fallback path when Gemini grounded web is unavailable", async () => {
     const agent = new DoctorAssistantAgent({
       gemini: { enabled: false },
       readSessions: async () => [],
@@ -102,6 +102,7 @@ describe("DoctorAssistantAgent chat fallbacks", () => {
     });
     agent.sessionAgent.save = vi.fn().mockResolvedValue(undefined);
     agent.intentAgent.execute = vi.fn().mockResolvedValue({ data: baseClassification });
+    agent.externalAgent.execute = vi.fn();
     agent.recordAgent.execute = vi.fn().mockResolvedValue({
       data: {
         evidence: [
@@ -114,14 +115,6 @@ describe("DoctorAssistantAgent chat fallbacks", () => {
             source_page: 1,
           },
         ],
-      },
-    });
-    agent.externalAgent.execute = vi.fn().mockResolvedValue({
-      data: {
-        evidence: [],
-        error: "No reliable external results found.",
-        error_type: "no_results",
-        resolution: null,
       },
     });
     agent.safetyAgent.execute = vi.fn().mockResolvedValue({
@@ -144,25 +137,19 @@ describe("DoctorAssistantAgent chat fallbacks", () => {
     });
 
     expect(agent.recordAgent.execute).toHaveBeenCalled();
-    expect(agent.externalAgent.execute).toHaveBeenCalledWith(
-      expect.objectContaining({
-        query: "What can be the cause for thalamo capsular bleed?",
-      }),
-    );
-    expect(result.data.answer).toContain("I searched approved external medical sources but did not find a reliable answer for that question.");
-    expect(result.data.answer).not.toContain("The uploaded record documents:");
+    expect(agent.externalAgent.execute).not.toHaveBeenCalled();
+    expect(result.data.answer).toContain("require Gemini grounded web search");
     expect(result.data.source_class).toBe("external");
     expect(result.data.refused).toBe(false);
     expect(result.data.confidence_label).toBe("low");
     expect(result.data.citations).toHaveLength(0);
-    expect(result.data.trace?.provider).toBe("policy_fallback");
+    expect(result.data.llm_provider).toBe("gemini_unavailable");
+    expect(result.data.trace?.provider).toBe("gemini_unavailable");
     expect(result.data.trace?.final_state).toBe("answered");
-    expect(result.data.trace?.steps.map((step: { key: string }) => step.key)).toEqual(
-      expect.arrayContaining(["routing", "record_context", "external_search", "safety", "answer"]),
-    );
+    expect(result.data.trace?.steps.map((step: { key: string }) => step.key)).toEqual(expect.arrayContaining(["routing", "record_context", "external_search", "safety", "answer"]));
   });
 
-  it("still collects external evidence when Gemini web search is enabled", async () => {
+  it("routes external turns directly to Gemini grounded web without external API evidence assembly", async () => {
     const agent = new DoctorAssistantAgent({
       gemini: { enabled: true, apiKey: "test-key" },
       readSessions: async () => [],
@@ -198,6 +185,7 @@ describe("DoctorAssistantAgent chat fallbacks", () => {
         sectionHints: ["medications"],
       },
     });
+    agent.externalAgent.execute = vi.fn();
     agent.recordAgent.execute = vi.fn().mockResolvedValue({
       data: {
         evidence: [
@@ -211,23 +199,6 @@ describe("DoctorAssistantAgent chat fallbacks", () => {
         ],
       },
     });
-    agent.externalAgent.execute = vi.fn().mockResolvedValue({
-      data: {
-        evidence: [
-          {
-            value: "Mannitol is an osmotic diuretic.",
-            label: "[MedlinePlus: Mannitol]",
-            source_class: "external",
-            source_section: "MedlinePlus",
-            source_excerpt: "Mannitol is an osmotic diuretic.",
-            url: "https://example.test/mannitol",
-          },
-        ],
-        error: null,
-        error_type: null,
-        resolution: { generic_name: "mannitol" },
-      },
-    });
     agent.safetyAgent.execute = vi.fn().mockResolvedValue({
       data: {
         confidence: { score: 80, label: "medium" },
@@ -236,12 +207,10 @@ describe("DoctorAssistantAgent chat fallbacks", () => {
     });
     agent.answerAgent.execute = vi.fn().mockResolvedValue({
       data: {
-        answer: "External Reference: Mannitol is an osmotic diuretic.",
+        answer: "Mannitol is used to reduce intracranial pressure.",
         citations: [],
         source_class: "external",
-        llm_provider: "external_fallback",
-        confidence_override: 60,
-        confidence_label_override: "low",
+        llm_provider: "gemini_web",
       },
     });
     agent.actionAgent.execute = vi.fn().mockResolvedValue({ data: { proposals: [] } });
@@ -254,13 +223,11 @@ describe("DoctorAssistantAgent chat fallbacks", () => {
       chatId: "chat-2",
     });
 
-    expect(agent.externalAgent.execute).toHaveBeenCalled();
+    expect(agent.externalAgent.execute).not.toHaveBeenCalled();
     expect(agent.answerAgent.execute).toHaveBeenCalledWith(
       expect.objectContaining({
         internalEvidence: [],
-        externalEvidence: expect.arrayContaining([
-          expect.objectContaining({ value: "Mannitol is an osmotic diuretic." }),
-        ]),
+        externalEvidence: [],
         externalComposer: "gemini_web",
       }),
     );
@@ -366,7 +333,7 @@ describe("ExternalKnowledgeAgent null-safe drug resolution", () => {
 });
 
 describe("AnswerComposerAgent Gemini fallback", () => {
-  it("falls back to structured external evidence when Gemini grounded search returns no usable text", async () => {
+  it("returns a Gemini grounded-search failure instead of assembling external API fallback answers", async () => {
     const agent = new AnswerComposerAgent({});
     agent.promptBuilder.buildGeminiExternal = vi.fn().mockReturnValue({
       systemInstruction: "system",
@@ -384,38 +351,19 @@ describe("AnswerComposerAgent Gemini fallback", () => {
         intent: "drug_safety",
         responseStyle: "default",
       },
-      internalEvidence: [
-        {
-          value: "INJ MANNITOL (20%) - 100 ML IV TDS",
-          label: "INJ MANNITOL (20%)",
-          source_section: "Medication Orders",
-          source_excerpt: "INJ MANNITOL (20%) - 100 ML IV TDS",
-          source_class: "internal",
-        },
-      ],
-      externalEvidence: [
-        {
-          value: "Mannitol is an osmotic diuretic used to reduce intracranial pressure.",
-          label: "[MedlinePlus: Mannitol]",
-          source_section: "MedlinePlus",
-          source_excerpt: "Mannitol is an osmotic diuretic used to reduce intracranial pressure.",
-          source_class: "external",
-          url: "https://example.test/mannitol",
-        },
-      ],
-      externalMeta: {
-        resolution: { generic_name: "mannitol" },
-      },
+      internalEvidence: [],
+      externalEvidence: [],
+      externalMeta: null,
       externalComposer: "gemini_web",
       geminiApiKey: "test-key",
       chatHistory: [],
     });
 
-    expect(result.data.answer).toContain("External Reference:");
-    expect(result.data.answer).not.toContain("did not return a usable answer");
+    expect(result.data.answer).toContain("Gemini grounded web search did not return a usable answer right now.");
     expect(result.data.source_class).toBe("external");
-    expect(result.data.llm_provider).toBe("external_fallback");
+    expect(result.data.llm_provider).toBe("gemini_web_failed");
     expect(result.data.confidence_label_override).toBe("low");
+    expect(result.data.citations).toEqual([]);
   });
 
   it("does not manufacture dosage guidance from rxnorm pack results", () => {

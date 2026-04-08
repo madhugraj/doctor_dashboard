@@ -212,7 +212,6 @@ class AnswerComposerAgent {
       const groundedPrompt = this.promptBuilder.buildGeminiExternal({
         message,
         classification,
-        externalEvidence,
         chatHistory,
       });
       const geminiResult = await this.geminiClient.executeGroundedSearch(message, {
@@ -235,72 +234,13 @@ class AnswerComposerAgent {
         };
       }
 
-      if (classification?.intent === "diagnosis_code" && externalEvidence.length) {
-        const codingAnswer = this.buildCodingAnswer(message, externalEvidence);
-        if (codingAnswer) {
-          return {
-            success: true,
-            step: "answer_composer",
-            data: {
-              ...codingAnswer,
-              llm_provider: "external_fallback",
-              confidence_override: 60,
-              confidence_label_override: "low",
-            },
-          };
-        }
-      }
-
-      if (classification?.intent === "clinical_explanation" && externalEvidence.length) {
-        const explanationAnswer = this.buildClinicalExplanationAnswer(message, internalEvidence, externalEvidence);
-        if (explanationAnswer) {
-          return {
-            success: true,
-            step: "answer_composer",
-            data: {
-              ...explanationAnswer,
-              llm_provider: "external_fallback",
-              confidence_override: 60,
-              confidence_label_override: "low",
-            },
-          };
-        }
-      }
-
-      if ((classification?.intent === "drug_safety" || externalMeta?.resolution?.generic_name || externalMeta?.resolution?.normalized_display) && externalEvidence.length) {
-        const drugAnswer = this.buildDrugKnowledgeAnswer(message, internalEvidence, externalEvidence, externalMeta?.resolution || null);
-        if (drugAnswer) {
-          return {
-            success: true,
-            step: "answer_composer",
-            data: {
-              ...drugAnswer,
-              llm_provider: "external_fallback",
-              confidence_override: 60,
-              confidence_label_override: "low",
-            },
-          };
-        }
-      }
-
-      const fallback = this.buildExternalOnlyFallback(message, externalEvidence, externalMeta?.resolution || null);
-      if (fallback) {
-        return {
-          success: true,
-          step: "answer_composer",
-          data: {
-            ...fallback,
-            confidence_override: 60,
-            confidence_label_override: "low",
-          },
-        };
-      }
-
       return {
         success: true,
         step: "answer_composer",
         data: {
-          answer: "I tried Gemini web grounding for this external question, but the grounded web search did not return a usable answer right now.",
+          answer: geminiResult.error
+            ? `Gemini grounded web search did not return a usable answer right now. ${geminiResult.error}`
+            : "Gemini grounded web search did not return a usable answer right now.",
           citations: [],
           source_class: "external",
           llm_provider: "gemini_web_failed",
