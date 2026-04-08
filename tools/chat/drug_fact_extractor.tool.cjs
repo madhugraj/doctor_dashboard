@@ -19,7 +19,8 @@ class DrugFactExtractorTool {
   extract({ message = "", externalEvidence = [], resolution = {} } = {}) {
     const lower = String(message || "").toLowerCase();
     const evidence = Array.isArray(externalEvidence) ? externalEvidence : [];
-    const generic = resolution.generic_name || resolution.normalized_display || resolution.primary_mention || "";
+    const resolved = resolution && typeof resolution === "object" ? resolution : {};
+    const generic = resolved.generic_name || resolved.normalized_display || resolved.primary_mention || "";
 
     if (!evidence.length) return null;
 

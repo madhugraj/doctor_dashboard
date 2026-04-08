@@ -435,6 +435,24 @@ describe("AnswerComposerAgent Gemini fallback", () => {
     expect(result).toBeNull();
   });
 
+  it("handles a null resolution object without throwing during external fallback extraction", () => {
+    const extractor = new DrugFactExtractorTool({});
+
+    expect(() =>
+      extractor.extract({
+        message: "what are the cause for TB meningo-encephalitis with seizures?",
+        externalEvidence: [
+          {
+            value: "Tuberculous meningitis can present with seizures due to cortical irritation.",
+            source_section: "PubMed",
+            source_excerpt: "Tuberculous meningitis can present with seizures due to cortical irritation.",
+          },
+        ],
+        resolution: null,
+      }),
+    ).not.toThrow();
+  });
+
   it("builds human-readable rxnorm display links instead of raw json endpoints", () => {
     const tool = new MedicalWebSearchTool({});
     const url = tool.buildRxNormDisplayUrl("insulin regular human", "1798388");
