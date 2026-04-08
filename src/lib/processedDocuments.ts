@@ -434,6 +434,20 @@ export type ProcessedDocument = {
   };
 };
 
+export const extractProcessedDocumentResponse = (payload: unknown): ProcessedDocument | null => {
+  if (!payload || typeof payload !== "object") return null;
+
+  const candidate =
+    "document" in payload
+      ? (payload as { document?: unknown }).document
+      : payload;
+
+  if (!candidate || typeof candidate !== "object") return null;
+  if (!("id" in candidate) || !("status" in candidate)) return null;
+
+  return candidate as ProcessedDocument;
+};
+
 type PresentationCard = {
   section: string;
   title: string;
@@ -552,6 +566,43 @@ const dedupeStrings = (items: Array<string | null | undefined>) => {
     if (seen.has(key)) continue;
     seen.add(key);
     output.push(normalized);
+  }
+
+  return output;
+};
+
+const dedupeMedicationEntries = <
+  T extends {
+    name?: string;
+    dose?: string;
+    frequency?: string;
+    route?: string;
+    category?: string;
+    start?: string;
+    instructions?: string;
+  },
+>(
+  items: T[]
+) => {
+  const seen = new Set<string>();
+  const output: T[] = [];
+
+  for (const item of items) {
+    const key = [
+      item?.name,
+      item?.dose,
+      item?.frequency,
+      item?.route,
+      item?.category,
+      item?.start,
+      item?.instructions,
+    ]
+      .map((value) => String(value || "").trim().toLowerCase())
+      .join("|");
+
+    if (!String(item?.name || "").trim() || seen.has(key)) continue;
+    seen.add(key);
+    output.push(item);
   }
 
   return output;
@@ -992,7 +1043,7 @@ export const transformProcessedDocument = (document: ProcessedDocument): Dashboa
     .map((allergen) => allergen?.trim())
     .filter((allergen): allergen is string => Boolean(allergen) && !isUnknownAllergyMarker(allergen));
   const medicationList = medicationsSectionSupported
-    ? (cards.medications_card?.medication_list || extracted.medications || [])
+    ? dedupeMedicationEntries(cards.medications_card?.medication_list || extracted.medications || [])
     : [];
   const extractedLabResults = extracted.lab_results?.map((result) => ({
     test: result.test_name || result.test || "Unknown",
@@ -1776,7 +1827,7 @@ export const transformProcessedDocument = (document: ProcessedDocument): Dashboa
         alternative: "",
       })),
       changes: {
-        added: medicationList.map(med => `• ${med.name} ${med.dose || ""}`),
+        added: [],
         adjusted: [],
         discontinued: [],
       },

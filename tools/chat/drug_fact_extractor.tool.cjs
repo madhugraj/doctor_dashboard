@@ -25,6 +25,7 @@ class DrugFactExtractorTool {
 
     const medline = this.pick(evidence, (section) => /medlineplus/i.test(section));
     const fda = this.pick(evidence, (section, excerpt) => /fda drug label/i.test(section) && /(indications|usage|used|active ingredient|contains)/i.test(excerpt));
+    const fdaDosage = this.pick(evidence, (section, excerpt) => /fda drug label/i.test(section) && /(dosage|dose|administration|units?)/i.test(excerpt));
     const rxnorm = this.pick(evidence, (section) => /rxnorm/i.test(section));
     const fdaText = String(fda?.source_excerpt || "").toLowerCase();
 
@@ -64,6 +65,22 @@ class DrugFactExtractorTool {
         }
         return { answer: generic ? `${generic}: ${sentence}` : sentence, citations: [fda] };
       }
+    }
+
+    if (/\b(dose|dosage|dose range|how much|units?)\b/.test(lower)) {
+      if (fdaDosage) {
+        return {
+          answer: this.firstSentence(fdaDosage.source_excerpt || fdaDosage.value),
+          citations: [fdaDosage],
+        };
+      }
+      if (medline && /\b(dose|dosage|units?)\b/i.test(`${medline.source_excerpt || ""} ${medline.value || ""}`)) {
+        return {
+          answer: this.firstSentence(medline.source_excerpt || medline.value),
+          citations: [medline],
+        };
+      }
+      return null;
     }
 
     if (/\b(alternative|substitute|replace|comparison)\b/.test(lower)) {

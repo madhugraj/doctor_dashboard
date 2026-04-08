@@ -172,6 +172,10 @@ Return JSON only.`;
       result.isActionRequest = true;
     }
 
+    if (result.needsExternal && !result.needsClarification && !result.outOfScope) {
+      result.requiresExternalConsent = true;
+    }
+
     return result;
   }
 

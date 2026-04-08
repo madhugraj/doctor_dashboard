@@ -76,15 +76,28 @@ class ExternalKnowledgeAgent {
     });
   }
 
+  emptyResolvedEntity() {
+    return {
+      primary_mention: "",
+      normalized_display: "",
+      generic_name: "",
+      ingredient_list: [],
+      dosage_form: "",
+      strength: "",
+      matched_internal_value: "",
+      confidence: 0,
+    };
+  }
+
   async execute({ query, classification, internalEvidence = [] }) {
     try {
       const plan = await this.queryPlanner.plan(query, classification);
       if (plan.knowledge_type === "drug_knowledge" || plan.knowledge_type === "drug_comparison") {
-        plan.resolved_entity = await this.drugResolver.resolve(query, internalEvidence);
+        plan.resolved_entity = (await this.drugResolver.resolve(query, internalEvidence)) || this.emptyResolvedEntity();
         const resolvedTerms = [
-          plan.resolved_entity.generic_name,
-          plan.resolved_entity.normalized_display,
-          plan.resolved_entity.primary_mention,
+          plan.resolved_entity?.generic_name,
+          plan.resolved_entity?.normalized_display,
+          plan.resolved_entity?.primary_mention,
         ].filter(Boolean);
         if (resolvedTerms.length) {
           plan.entity = resolvedTerms[0];

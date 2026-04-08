@@ -16,6 +16,8 @@ class ExternalQueryPlannerTool {
 
     if (/\b(composition|ingredient|contains|active ingredient)\b/.test(lower)) {
       variants.push(`${base} composition`, `${base} active ingredient`, `${base} generic name`);
+    } else if (/\b(dose|dosage|dose range|how much|units?)\b/.test(lower)) {
+      variants.push(`${base} dosage and administration`, `${base} dosing`, `${base} injection dosage`);
     } else if (/\b(what does|used for|purpose|why do we need|role|indication)\b/.test(lower)) {
       variants.push(`${base} indication`, `${base} uses`, `${base} drug label`);
     } else if (/\b(come with|come in|strength|dose|dosage|syrup|tablet|injection|availability|market|formulation)\b/.test(lower)) {
@@ -27,6 +29,13 @@ class ExternalQueryPlannerTool {
     }
 
     return Array.from(new Set(variants.filter(Boolean)));
+  }
+
+  stripQuestionLead(query = "") {
+    return String(query || "")
+      .replace(/^(?:what is|what are|explain|define|meaning of)\s+/i, "")
+      .replace(/\?+$/g, "")
+      .trim();
   }
 
   defaultPlan(query = "", classification = {}) {
@@ -86,6 +95,17 @@ class ExternalQueryPlannerTool {
     }
 
     if (intent === "clinical_explanation") {
+      if (/^(what is|what are|explain|define|meaning of)\b/i.test(lower)) {
+        const entity = this.stripQuestionLead(trimmed);
+        return {
+          knowledge_type: "general_medical_reference",
+          entity: entity || trimmed,
+          search_queries: [entity || trimmed, `${entity || trimmed} overview`, `${entity || trimmed} symptoms causes`],
+          source_preferences: ["medlineplus", "pubmed"],
+          needs_clarification: false,
+          clarification_prompt: "",
+        };
+      }
       if ((lower.includes("bp") || lower.includes("blood pressure")) && (lower.includes("low") || lower.includes("less than") || lower.includes("below"))) {
         return {
           knowledge_type: "clinical_explanation",

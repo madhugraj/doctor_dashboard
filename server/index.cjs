@@ -378,7 +378,7 @@ app.get("/api/documents/:id", async (req, res) => {
     return res.status(404).json({ error: "Document not found" });
   }
 
-  return res.json(publicDocument(document));
+  return res.json({ document: publicDocument(document) });
 });
 
 app.use(express.static(distDir));
@@ -1097,7 +1097,7 @@ app.post("/api/documents/:id/chart-note/pdf", async (req, res) => {
       const gemmaClient = new GemmaClientTool({
         baseUrl: GEMMA_URL,
         model: MODEL,
-        timeout: 90000
+        timeout: 180000
       });
       const promptBuilder = new PromptBuilderTool();
       const pdfReader = new PdfReaderTool();
@@ -1125,11 +1125,14 @@ app.post("/api/documents/:id/chart-note/pdf", async (req, res) => {
       // Calculate max output tokens based on input size
       // Model has 16384 token max context - leave room for output
       const MAX_CONTEXT = 16384;
-      const MIN_OUTPUT = 1000;
-      const MAX_OUTPUT = 2000;
-      const inputSize = (JSON.stringify(extractedData).length + JSON.stringify(validationResult.data.citations).length) / 4;
-      // Reserve 500 tokens for safety margin
-      const maxOutputTokens = Math.max(MIN_OUTPUT, Math.min(MAX_OUTPUT, MAX_CONTEXT - inputSize - 500));
+      const MIN_OUTPUT = 800;
+      const MAX_OUTPUT = 1800;
+      const dataSize = (JSON.stringify(extractedData).length + JSON.stringify(validationResult.data.citations).length) / 4;
+      // Prompt template adds ~7000 tokens for 11-section format
+      const PROMPT_TEMPLATE_SIZE = 7000;
+      const inputSize = dataSize + PROMPT_TEMPLATE_SIZE;
+      // Small safety margin
+      const maxOutputTokens = Math.max(MIN_OUTPUT, Math.min(MAX_OUTPUT, Math.floor(MAX_CONTEXT - inputSize - 100)));
 
       console.log(`Token budget: input=${Math.floor(inputSize)}, output=${maxOutputTokens}, total=${Math.floor(inputSize) + maxOutputTokens}/${MAX_CONTEXT}`);
 
@@ -1149,6 +1152,11 @@ app.post("/api/documents/:id/chart-note/pdf", async (req, res) => {
       }
 
       chartNoteContent = chartNoteResult.content.trim();
+
+      // Add end of record marker
+      if (!chartNoteContent.includes("END OF RECORD")) {
+        chartNoteContent += "\n\n***** END OF RECORD *****";
+      }
 
       // Cache the chart note
       await updateDocument(req.params.id, async (currentDocument) => {
@@ -1317,6 +1325,21 @@ app.post("/api/documents/:id/chart-note/pdf", async (req, res) => {
               yPosition += isChiefComplaint ? 14 : 8; // More spacing for CHIEF COMPLAINT
             }
           }
+          return;
+        }
+
+        // Special handling for END OF RECORD marker
+        if (trimmed.includes("END OF RECORD")) {
+          yPosition += 20; // Extra spacing before END OF RECORD
+          checkPageBreak(30);
+
+          // Center aligned END OF RECORD
+          doc.fontSize(9).font("Helvetica-Bold").fillColor("#374151");
+          doc.text("***** END OF RECORD *****", leftMargin, yPosition, {
+            width: contentWidth,
+            align: "center"
+          });
+          yPosition += doc.heightOfString("***** END OF RECORD *****", { width: contentWidth, align: "center" }) + 15;
           return;
         }
 

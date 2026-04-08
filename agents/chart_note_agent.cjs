@@ -1016,7 +1016,9 @@ ${riskFlags.trim()}
 _________________________
 Generated: ${new Date().toLocaleString()}
 Note: This chart note was automatically generated from the discharge summary document. Clinician review and signature required.
-Validation Summary: ${sections.validationSummary}`;
+Validation Summary: ${sections.validationSummary}
+
+***** END OF RECORD *****`;
 
     return finalNote;
   }

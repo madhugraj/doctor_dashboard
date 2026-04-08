@@ -17,6 +17,7 @@ import ChatAssistantPanel from "@/components/dashboard/ChatAssistantPanel";
 import { patientData, type DashboardPatientData } from "@/data/patientData";
 import {
   API_BASE,
+  extractProcessedDocumentResponse,
   fallbackDashboardData,
   getProcessedDocumentMrn,
   getProcessedDocumentPatientName,
@@ -266,7 +267,7 @@ const Index = () => {
       })
       .then((payload) => {
         if (!cancelled) {
-          setProcessedDocument(payload.document ?? null);
+          setProcessedDocument(extractProcessedDocumentResponse(payload));
         }
       })
       .catch((error) => {

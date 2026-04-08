@@ -171,10 +171,22 @@ class MedicalWebSearchTool {
     return `https://rxnav.nlm.nih.gov/REST/drugs.json?name=${this.encode(name)}`;
   }
 
+  buildRxNormDisplayUrl(name = "", rxcui = "") {
+    if (rxcui) {
+      return `https://mor.nlm.nih.gov/RxNav/search?searchBy=RXCUI&searchTerm=${this.encode(rxcui)}`;
+    }
+    return `https://mor.nlm.nih.gov/RxNav/search?searchBy=RXNAME&searchTerm=${this.encode(name)}`;
+  }
+
   async searchRxNorm(query) {
     const queries = this.buildDrugQueries(query);
     const seen = new Set();
-    const results = [];
+    const preferredResults = [];
+    const deferredPackResults = [];
+    const lower = String(query || "").toLowerCase();
+    const wantsDosage = /\b(dose|dosage|dose range|how much|units?)\b/.test(lower);
+    const wantsInjection = /\b(inj|injection|iv|im|sc|subcutaneous)\b/.test(lower);
+    const wantsPack = /\b(pack|kit|bundle)\b/.test(lower);
 
     for (const drug of queries) {
       const payload = await this.fetchJson(this.buildRxNormSearchUrl(drug));
@@ -183,25 +195,36 @@ class MedicalWebSearchTool {
       for (const group of groups) {
         const concepts = Array.isArray(group?.conceptProperties) ? group.conceptProperties : [];
         for (const item of concepts) {
+          const tty = String(item?.tty || "");
+          const candidateText = `${item?.name || ""} ${item?.synonym || ""}`.toLowerCase();
+          const isPackLike = /PCK$/i.test(tty) || /pack|kit|bundle/i.test(candidateText);
+          if (!wantsPack && isPackLike) continue;
+          if (wantsDosage && /PCK$/i.test(tty)) continue;
+          if (wantsDosage && /pack|inhalation/i.test(candidateText)) continue;
+          if (wantsInjection && /inhalation|tablet|capsule|oral|powder/i.test(candidateText)) continue;
           const key = `${item?.rxcui || ""}:${item?.name || ""}`;
           if (!item?.name || seen.has(key)) continue;
           seen.add(key);
-          results.push({
+          const normalized = {
             value: item.name,
             title: item.name,
             snippet: `${item.synonym ? `${item.synonym}. ` : ""}${item.tty ? `Term type: ${item.tty}. ` : ""}${item.rxcui ? `RxCUI: ${item.rxcui}.` : ""}`.trim(),
             source_section: "RxNorm",
             url: this.buildRxNormSearchUrl(drug),
+            display_url: this.buildRxNormDisplayUrl(item.name, item.rxcui),
             retrieved_at: new Date().toISOString(),
             confidence: 0.82,
             label: `[RxNorm: ${item.name}]`,
-          });
-          if (results.length >= 5) return results;
+            tty,
+          };
+          if (isPackLike) deferredPackResults.push(normalized);
+          else preferredResults.push(normalized);
+          if (preferredResults.length >= 5) return preferredResults;
         }
       }
     }
 
-    return results;
+    return preferredResults.length ? preferredResults : deferredPackResults.slice(0, 5);
   }
 
   async searchMedlinePlus(query) {
@@ -308,6 +331,7 @@ class MedicalWebSearchTool {
     const lower = String(query || "").toLowerCase();
     const wantsPurpose = /\b(what does|used for|purpose|why do we need|role|indication)\b/.test(lower);
     const wantsComposition = /\b(composition|ingredient|contains|active ingredient)\b/.test(lower);
+    const wantsDosage = /\b(dose|dosage|dose range|how much|units?)\b/.test(lower);
 
     for (const drug of queries) {
       const searchExpr = [
@@ -324,7 +348,9 @@ class MedicalWebSearchTool {
             value: item.openfda?.generic_name?.[0] || drug,
             title: item.openfda?.brand_name?.[0] || item.openfda?.generic_name?.[0] || drug,
             snippet:
-              (wantsPurpose
+              (wantsDosage
+                ? item.dosage_and_administration?.[0] || item.indications_and_usage?.[0] || item.description?.[0]
+                : wantsPurpose
                 ? item.indications_and_usage?.[0] || item.dosage_and_administration?.[0] || item.description?.[0]
                 : wantsComposition
                 ? item.description?.[0] || item.indications_and_usage?.[0]

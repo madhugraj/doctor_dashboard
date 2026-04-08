@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { transformProcessedDocument, type ProcessedDocument } from "@/lib/processedDocuments";
+import {
+  extractProcessedDocumentResponse,
+  transformProcessedDocument,
+  type ProcessedDocument,
+} from "@/lib/processedDocuments";
 
 const createProcessedDocument = (overrides?: Partial<ProcessedDocument>): ProcessedDocument => ({
   id: "doc-1",
@@ -29,6 +33,14 @@ const createProcessedDocument = (overrides?: Partial<ProcessedDocument>): Proces
 });
 
 describe("transformProcessedDocument", () => {
+  it("accepts both wrapped and flat processed document payloads", () => {
+    const document = createProcessedDocument();
+
+    expect(extractProcessedDocumentResponse(document)).toEqual(document);
+    expect(extractProcessedDocumentResponse({ document })).toEqual(document);
+    expect(extractProcessedDocumentResponse({})).toBeNull();
+  });
+
   it("suppresses unsupported diagnosis, medications, and discharge sections when provenance is unsafe", () => {
     const transformed = transformProcessedDocument(
       createProcessedDocument({
@@ -181,5 +193,46 @@ describe("transformProcessedDocument", () => {
     expect(transformed.dischargePlan.dietary).toEqual(["Diet: Soft diet"]);
     expect(transformed.dischargePlan.activityRestrictions.okToDo).toEqual(["Continue breathing exercises."]);
     expect(transformed.dischargePlan.redFlags).toEqual(["Fever."]);
+  });
+
+  it("dedupes medication entries and does not fabricate medication changes from the active list", () => {
+    const transformed = transformProcessedDocument(
+      createProcessedDocument({
+        result: {
+          meta: {
+            pdf_file: "report.pdf",
+            department_type: "General",
+          },
+          sample_patient_data: {
+            name: "Test Patient",
+            age: 50,
+            mrn: "MRN-1",
+            admission_date: "2026-04-01",
+            discharge_date: "2026-04-05",
+          },
+          dashboard_cards: {
+            medications_card: {
+              medication_list: [
+                { name: "TAB Paracetamol", dose: "500 mg", frequency: "TDS" },
+                { name: "TAB Paracetamol", dose: "500 mg", frequency: "TDS" },
+              ],
+            },
+          },
+          extracted_data: {
+            patient: {
+              gender: "Male",
+            },
+          },
+        },
+      }),
+    );
+
+    expect(transformed.medications.active).toHaveLength(1);
+    expect(transformed.medications.active[0].name).toBe("TAB Paracetamol");
+    expect(transformed.medications.changes).toEqual({
+      added: [],
+      adjusted: [],
+      discontinued: [],
+    });
   });
 });

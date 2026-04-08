@@ -79,6 +79,12 @@ const MedicationsDetail = ({ onBack, data }: MedicationsDetailProps) => {
   const allergiesList = (medications.allergies || []).filter(
     (allergy) => !isUnknownAllergyMarker(allergy.allergen)
   );
+  const medicationChanges = medications.changes || { added: [], adjusted: [], discontinued: [] };
+  const hasMedicationChanges =
+    Boolean(medications.interactionCheck) ||
+    (medicationChanges.added?.length || 0) > 0 ||
+    (medicationChanges.adjusted?.length || 0) > 0 ||
+    (medicationChanges.discontinued?.length || 0) > 0;
   const showStartColumn = medicationList.some((med) => String(med.start || "").trim().length > 0);
 
   // Group medications by category
@@ -220,34 +226,40 @@ const MedicationsDetail = ({ onBack, data }: MedicationsDetailProps) => {
       )}
 
       {/* Changes */}
-      <div className="bg-card rounded-xl border p-5">
-        <h3 className="font-semibold text-sm mb-4 text-foreground">Medication Changes During Stay</h3>
-        <div className="grid md:grid-cols-3 gap-4">
-          <div className="p-4 rounded-lg bg-status-normal/5 border border-status-normal/20">
-            <h4 className="font-semibold text-xs text-status-normal uppercase mb-2">Added</h4>
-            <ul className="space-y-1 text-sm text-foreground">
-              {medications.changes?.added?.length > 0
-                ? medications.changes.added.map((m, i) => <li key={i}>• {m}</li>)
-                : <li className="text-muted-foreground">None</li>}
-            </ul>
+      {hasMedicationChanges ? (
+        <div className="bg-card rounded-xl border p-5">
+          <h3 className="font-semibold text-sm mb-4 text-foreground">Medication Changes During Stay</h3>
+          <div className="grid md:grid-cols-3 gap-4">
+            <div className="p-4 rounded-lg bg-status-normal/5 border border-status-normal/20">
+              <h4 className="font-semibold text-xs text-status-normal uppercase mb-2">Added</h4>
+              <ul className="space-y-1 text-sm text-foreground">
+                {medicationChanges.added?.length > 0
+                  ? medicationChanges.added.map((m, i) => <li key={i}>• {m}</li>)
+                  : <li className="text-muted-foreground">None</li>}
+              </ul>
+            </div>
+            <div className="p-4 rounded-lg bg-status-warning/5 border border-status-warning/20">
+              <h4 className="font-semibold text-xs text-status-warning uppercase mb-2">Adjusted</h4>
+              <ul className="space-y-1 text-sm text-foreground">
+                {medicationChanges.adjusted?.length > 0
+                  ? medicationChanges.adjusted.map((m, i) => <li key={i}>• {m}</li>)
+                  : <li className="text-muted-foreground">None</li>}
+              </ul>
+            </div>
+            <div className="p-4 rounded-lg bg-muted/50 border">
+              <h4 className="font-semibold text-xs text-muted-foreground uppercase mb-2">Discontinued</h4>
+              <ul className="space-y-1 text-sm text-foreground">
+                {medicationChanges.discontinued?.length > 0
+                  ? medicationChanges.discontinued.map((m, i) => <li key={i}>• {m}</li>)
+                  : <li className="text-muted-foreground">None</li>}
+              </ul>
+            </div>
           </div>
-          <div className="p-4 rounded-lg bg-status-warning/5 border border-status-warning/20">
-            <h4 className="font-semibold text-xs text-status-warning uppercase mb-2">Adjusted</h4>
-            <ul className="space-y-1 text-sm text-foreground">
-              {medications.changes?.adjusted?.length > 0
-                ? medications.changes.adjusted.map((m, i) => <li key={i}>• {m}</li>)
-                : <li className="text-muted-foreground">None</li>}
-            </ul>
-          </div>
-          <div className="p-4 rounded-lg bg-muted/50 border">
-            <h4 className="font-semibold text-xs text-muted-foreground uppercase mb-2">Discontinued</h4>
-            <p className="text-sm text-muted-foreground">None</p>
-          </div>
+          {medications.interactionCheck && (
+            <p className="mt-4 text-sm text-status-normal">✅ {medications.interactionCheck}</p>
+          )}
         </div>
-        {medications.interactionCheck && (
-          <p className="mt-4 text-sm text-status-normal">✅ {medications.interactionCheck}</p>
-        )}
-      </div>
+      ) : null}
     </div>
   );
 };

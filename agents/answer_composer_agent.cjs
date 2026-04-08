@@ -93,7 +93,7 @@ class AnswerComposerAgent {
     const lower = String(message || "").toLowerCase();
     const topInternal = internalEvidence[0];
     const topExternal = externalEvidence[0];
-    const internalLine = topInternal?.value ? `Patient Record: ${topInternal.value}.` : "Patient Record: No chart-based explanation is documented.";
+    const internalLine = topInternal?.value ? `Patient Record: ${topInternal.value}.` : "";
 
     if (!topExternal) {
       return null;
@@ -111,7 +111,7 @@ class AnswerComposerAgent {
     if (!externalLine) return null;
 
     return {
-      answer: `${internalLine}\n\nExternal Reference: ${externalLine}`,
+      answer: internalLine ? `${internalLine}\n\nExternal Reference: ${externalLine}` : `External Reference: ${externalLine}`,
       citations: this.citationAssembler.assemble([topInternal, ...externalEvidence].filter(Boolean), { max: 4 }),
       source_class: topInternal ? "mixed" : "external",
     };
@@ -121,7 +121,6 @@ class AnswerComposerAgent {
     if (!externalEvidence.length) return null;
 
     const topInternal = internalEvidence[0];
-    const internalLine = topInternal?.value ? `Patient Record: ${topInternal.value}.` : "";
     const extracted = this.drugFactExtractor.extract({ message, externalEvidence, resolution });
     let externalLine = extracted?.answer || "";
     const combinedExternal = externalEvidence.map((item) => `${item.value || ""} ${item.source_excerpt || ""}`).join(" ").toLowerCase();
@@ -147,12 +146,10 @@ class AnswerComposerAgent {
 
     if (!externalLine) return null;
 
-    const answer = `${internalLine ? `${internalLine}\n\n` : ""}External Reference: ${externalLine}`;
-
     return {
-      answer,
-      citations: this.citationAssembler.assemble([topInternal, ...(extracted?.citations || externalEvidence)].filter(Boolean), { max: 4 }),
-      source_class: topInternal ? "mixed" : "external",
+      answer: `External Reference: ${externalLine}`,
+      citations: this.citationAssembler.assemble(extracted?.citations || externalEvidence, { max: 4 }),
+      source_class: "external",
     };
   }
 
@@ -215,7 +212,7 @@ class AnswerComposerAgent {
       const groundedPrompt = this.promptBuilder.buildGeminiExternal({
         message,
         classification,
-        externalEvidence: [],
+        externalEvidence,
         chatHistory,
       });
       const geminiResult = await this.geminiClient.executeGroundedSearch(message, {
@@ -238,6 +235,67 @@ class AnswerComposerAgent {
         };
       }
 
+      if (classification?.intent === "diagnosis_code" && externalEvidence.length) {
+        const codingAnswer = this.buildCodingAnswer(message, externalEvidence);
+        if (codingAnswer) {
+          return {
+            success: true,
+            step: "answer_composer",
+            data: {
+              ...codingAnswer,
+              llm_provider: "external_fallback",
+              confidence_override: 60,
+              confidence_label_override: "low",
+            },
+          };
+        }
+      }
+
+      if (classification?.intent === "clinical_explanation" && externalEvidence.length) {
+        const explanationAnswer = this.buildClinicalExplanationAnswer(message, internalEvidence, externalEvidence);
+        if (explanationAnswer) {
+          return {
+            success: true,
+            step: "answer_composer",
+            data: {
+              ...explanationAnswer,
+              llm_provider: "external_fallback",
+              confidence_override: 60,
+              confidence_label_override: "low",
+            },
+          };
+        }
+      }
+
+      if ((classification?.intent === "drug_safety" || externalMeta?.resolution?.generic_name || externalMeta?.resolution?.normalized_display) && externalEvidence.length) {
+        const drugAnswer = this.buildDrugKnowledgeAnswer(message, internalEvidence, externalEvidence, externalMeta?.resolution || null);
+        if (drugAnswer) {
+          return {
+            success: true,
+            step: "answer_composer",
+            data: {
+              ...drugAnswer,
+              llm_provider: "external_fallback",
+              confidence_override: 60,
+              confidence_label_override: "low",
+            },
+          };
+        }
+      }
+
+      const fallback = this.buildExternalOnlyFallback(message, externalEvidence, externalMeta?.resolution || null);
+      if (fallback) {
+        return {
+          success: true,
+          step: "answer_composer",
+          data: {
+            ...fallback,
+            confidence_override: 60,
+            confidence_label_override: "low",
+          },
+        };
+      }
+
       return {
         success: true,
         step: "answer_composer",
@@ -246,6 +304,9 @@ class AnswerComposerAgent {
           citations: [],
           source_class: "external",
           llm_provider: "gemini_web_failed",
+          confidence_override: 60,
+          confidence_label_override: "low",
+          refused_override: false,
         },
       };
     }
