@@ -54,6 +54,7 @@
     --section-notes: 84 44% 40%;
     --section-discharge: 156 37% 42%;
     --section-followup: 132 34% 40%;
+    --section-pending: 38 92% 50%;
 
     --sidebar-background: 0 0% 98%;
     --sidebar-foreground: 240 5.3% 26.1%;
@@ -130,5 +131,10 @@
 
   .section-card {
     @apply bg-card rounded-[18px] border border-slate-200 shadow-[0_6px_18px_rgba(15,23,42,0.035)] hover:-translate-y-0.5 hover:shadow-[0_10px_22px_rgba(15,23,42,0.06)] transition-all duration-200 cursor-pointer;
+  }
+
+  /* Uniform card heights for grid items */
+  .card-uniform {
+    min-height: 160px;
   }
 }

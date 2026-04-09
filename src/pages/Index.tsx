@@ -12,7 +12,8 @@ import TreatmentDetail from "@/components/dashboard/TreatmentDetail";
 import ClinicalNotesDetail from "@/components/dashboard/ClinicalNotesDetail";
 import DischargeDetail from "@/components/dashboard/DischargeDetail";
 import FollowUpDetail from "@/components/dashboard/FollowUpDetail";
-import SectionProvenanceBadge from "@/components/dashboard/SectionProvenanceBadge";
+import PendingItemsDetail from "@/components/dashboard/PendingItemsDetail";
+import RiskWatchDetail from "@/components/dashboard/RiskWatchDetail";
 import ChatAssistantPanel from "@/components/dashboard/ChatAssistantPanel";
 import { patientData, type DashboardPatientData } from "@/data/patientData";
 import {
@@ -29,7 +30,7 @@ import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 
-type Section = null | "vitals" | "diagnosis" | "medications" | "labs" | "radiology" | "treatment" | "notes" | "discharge" | "followup";
+type Section = null | "vitals" | "diagnosis" | "medications" | "labs" | "radiology" | "treatment" | "notes" | "discharge" | "followup" | "pending" | "riskwatch";
 
 const formatStatusLabel = (value: string) =>
   value
@@ -52,6 +53,18 @@ const formatDateLabel = (value?: string) => {
     year: "numeric",
   });
 };
+
+const clampLines = (lines: number) => ({
+  display: "-webkit-box",
+  WebkitLineClamp: lines,
+  WebkitBoxOrient: "vertical" as const,
+  overflow: "hidden",
+});
+
+const CARD_VALUE_CLASS = "text-[20px] font-semibold leading-none text-slate-900";
+const CARD_LABEL_CLASS = "text-[11px] font-medium text-slate-500";
+const CARD_TEXT_CLASS = "text-[12px] leading-5 text-slate-600";
+const CARD_META_CLASS = "text-[11px] text-slate-500";
 
 const SUMMARY_CARD_CONFIG: Record<
   "vitals" | "diagnosis" | "medications" | "labs" | "radiology" | "treatment",
@@ -89,33 +102,37 @@ const Index = () => {
   );
   const summaryCards = d.presentation?.summaryCards || {};
   const notesRail = d.presentation?.notesRail || [];
+  const careGapsCard = summaryCards.care_gaps;
+  const riskWatchCard = summaryCards.risk_watch;
 
   const renderSummaryCardContent = (key: keyof typeof SUMMARY_CARD_CONFIG) => {
     const card = summaryCards[key];
 
     if (key === "vitals") {
       return (
-        <div className="space-y-1.5">
-          <div className="flex items-center justify-between text-[12px] text-slate-500">
-            <span>BP</span>
-            <span className="font-semibold text-slate-900">
+        <div className="flex h-full flex-col justify-between gap-1 overflow-hidden">
+          <div className="space-y-1">
+            <div className={`flex items-center justify-between ${CARD_META_CLASS}`}>
+              <span>BP</span>
+              <span className="font-semibold text-slate-900">
               {d.vitals.latest.bloodPressure.systolic}/{d.vitals.latest.bloodPressure.diastolic}
-              <span className="ml-1 text-[11px] font-medium text-slate-400">mmHg</span>
-            </span>
+                <span className="ml-1 text-[11px] font-medium text-slate-400">mmHg</span>
+              </span>
+            </div>
+            <div className={`flex items-center justify-between ${CARD_META_CLASS}`}>
+              <span>Pulse</span>
+              <span className="font-semibold text-slate-900">{d.vitals.latest.heartRate.value} bpm</span>
+            </div>
+            <div className={`flex items-center justify-between ${CARD_META_CLASS}`}>
+              <span>SpO2</span>
+              <span className="font-semibold text-slate-900">{d.vitals.latest.spo2.value}%</span>
+            </div>
+            <div className={`flex items-center justify-between ${CARD_META_CLASS}`}>
+              <span>Temp</span>
+              <span className="font-semibold text-slate-900">{d.vitals.latest.temperature.value}°F</span>
+            </div>
           </div>
-          <div className="flex items-center justify-between text-[12px] text-slate-500">
-            <span>Pulse</span>
-            <span className="font-semibold text-slate-900">{d.vitals.latest.heartRate.value} bpm</span>
-          </div>
-          <div className="flex items-center justify-between text-[12px] text-slate-500">
-            <span>SpO2</span>
-            <span className="font-semibold text-slate-900">{d.vitals.latest.spo2.value}%</span>
-          </div>
-          <div className="flex items-center justify-between text-[12px] text-slate-500">
-            <span>Temp</span>
-            <span className="font-semibold text-slate-900">{d.vitals.latest.temperature.value}°F</span>
-          </div>
-          <div className="pt-0.5">
+          <div>
             <StatusBadge
               status={((card?.status || "neutral") === "info" ? "neutral" : card?.status || "neutral") as "normal" | "warning" | "critical" | "neutral"}
               label={formatStatusLabel(card?.status || "neutral")}
@@ -127,19 +144,14 @@ const Index = () => {
 
     if (key === "diagnosis") {
       return (
-        <div className="space-y-1.5">
+        <div className="flex h-full flex-col justify-between gap-1 overflow-hidden">
           <p
-            className="text-[14px] font-semibold leading-[1.32] text-slate-900"
-            style={{
-              display: "-webkit-box",
-              WebkitLineClamp: 3,
-              WebkitBoxOrient: "vertical",
-              overflow: "hidden",
-            }}
+            className="text-[13px] font-semibold leading-[1.4] text-slate-900"
+            style={clampLines(3)}
           >
             {d.diagnosis.principal.description || card?.headlineMetric || "Diagnosis not available"}
           </p>
-          <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500">
+          <div className={`flex flex-wrap items-center gap-1.5 ${CARD_META_CLASS}`}>
             {d.diagnosis.principal.code ? (
               <span className="rounded-full bg-slate-100 px-2 py-0.5 font-mono text-[11px] text-slate-500">
                 {d.diagnosis.principal.code}
@@ -153,18 +165,18 @@ const Index = () => {
 
     if (key === "medications") {
       return (
-        <div className="space-y-1.5">
+        <div className="flex h-full flex-col justify-between gap-1 overflow-hidden">
           <div className="flex items-baseline gap-1.5">
-            <span className="text-[26px] font-semibold leading-none text-slate-900">{d.medications.active.length}</span>
-            <span className="text-[12px] text-slate-500">active medications</span>
+            <span className={CARD_VALUE_CLASS}>{d.medications.active.length}</span>
+            <span className={CARD_LABEL_CLASS}>active medications</span>
           </div>
-          <div className="space-y-0.5 text-[12px] text-slate-600">
+          <div className="space-y-0.5">
             {d.medications.active.slice(0, 2).map((med) => (
-              <p key={med.name} className="truncate">
+              <p key={med.name} className={CARD_TEXT_CLASS}>
                 {med.name}
               </p>
             ))}
-            {d.medications.active.length === 0 ? <p>No active medications documented.</p> : null}
+            {d.medications.active.length === 0 ? <p className={CARD_TEXT_CLASS}>No active medications documented.</p> : null}
           </div>
         </div>
       );
@@ -172,17 +184,17 @@ const Index = () => {
 
     if (key === "labs") {
       return (
-        <div className="space-y-1.5">
+        <div className="flex h-full flex-col justify-between gap-1 overflow-hidden">
           <div className="flex items-baseline gap-1.5">
-            <span className="text-[26px] font-semibold leading-none text-slate-900">{d.labs.totalTests}</span>
-            <span className="text-[12px] text-slate-500">{d.labs.hasResults ? "tests completed" : "tests ordered"}</span>
+            <span className={CARD_VALUE_CLASS}>{d.labs.totalTests}</span>
+            <span className={CARD_LABEL_CLASS}>{d.labs.hasResults ? "tests completed" : "tests ordered"}</span>
           </div>
           <div className="flex flex-wrap gap-1.5">
             {d.labs.abnormalCount > 0 ? <StatusBadge status="warning" label={`${d.labs.abnormalCount} abnormal`} /> : null}
             {d.labs.criticalCount > 0 ? <StatusBadge status="critical" label={`${d.labs.criticalCount} critical`} /> : null}
             {d.labs.abnormalCount === 0 && d.labs.criticalCount === 0 ? <StatusBadge status="normal" label="Normal" /> : null}
           </div>
-          <p className="text-[12px] leading-5 text-slate-500">
+          <p className={CARD_TEXT_CLASS} style={clampLines(2)}>
             {card?.supportingPoints?.[0] || (d.labs.hasResults ? "Results available for review." : `${d.labs.pendingCount} investigations ordered.`)}
           </p>
         </div>
@@ -191,13 +203,13 @@ const Index = () => {
 
     if (key === "radiology") {
       return (
-        <div className="space-y-1.5">
+        <div className="flex h-full flex-col justify-between gap-1 overflow-hidden">
           <div className="flex items-baseline gap-1.5">
-            <span className="text-[26px] font-semibold leading-none text-slate-900">{d.radiology.completedStudies}</span>
-            <span className="text-[12px] text-slate-500">findings</span>
+            <span className={CARD_VALUE_CLASS}>{d.radiology.completedStudies}</span>
+            <span className={CARD_LABEL_CLASS}>findings</span>
           </div>
           {d.radiology.criticalFindings > 0 ? <StatusBadge status="critical" label={`${d.radiology.criticalFindings} critical`} /> : <StatusBadge status="normal" label="Normal" />}
-          <p className="text-[12px] leading-5 text-slate-500">
+          <p className={CARD_TEXT_CLASS} style={clampLines(2)}>
             {d.radiology.pendingStudies > 0 ? `${d.radiology.pendingStudies} pending imaging items documented.` : "No pending imaging documented."}
           </p>
         </div>
@@ -205,23 +217,18 @@ const Index = () => {
     }
 
     return (
-      <div className="space-y-1.5">
+      <div className="flex h-full flex-col justify-between gap-1 overflow-hidden">
         <div className="flex items-baseline gap-1.5">
-          <span className="text-[26px] font-semibold leading-none text-slate-900">{d.treatment.activeManagement.length}</span>
-          <span className="text-[12px] text-slate-500">plan items</span>
+          <span className={CARD_VALUE_CLASS}>{d.treatment.activeManagement.length}</span>
+          <span className={CARD_LABEL_CLASS}>plan items</span>
         </div>
         <p
-          className="text-[13px] font-medium leading-5 text-slate-800"
-          style={{
-            display: "-webkit-box",
-            WebkitLineClamp: 2,
-            WebkitBoxOrient: "vertical",
-            overflow: "hidden",
-          }}
+          className="text-[12px] font-medium leading-5 text-slate-800"
+          style={clampLines(2)}
         >
           {d.treatment.currentApproach}
         </p>
-        <p className="text-[12px] leading-5 text-slate-500">{d.treatment.complicationsLabel}</p>
+        <p className={CARD_META_CLASS} style={clampLines(1)}>{d.treatment.complicationsLabel}</p>
       </div>
     );
   };
@@ -461,6 +468,8 @@ const Index = () => {
   if (activeSection === "notes") return <PageWrapper>{dashboardToolbar}<ClinicalNotesDetail onBack={handleBack} data={d} />{assistantPanel}</PageWrapper>;
   if (activeSection === "discharge") return <PageWrapper>{dashboardToolbar}<DischargeDetail onBack={handleBack} data={d} />{assistantPanel}</PageWrapper>;
   if (activeSection === "followup") return <PageWrapper>{dashboardToolbar}<FollowUpDetail onBack={handleBack} data={d} />{assistantPanel}</PageWrapper>;
+  if (activeSection === "pending") return <PageWrapper>{dashboardToolbar}<PendingItemsDetail onBack={handleBack} data={d} />{assistantPanel}</PageWrapper>;
+  if (activeSection === "riskwatch") return <PageWrapper>{dashboardToolbar}<RiskWatchDetail onBack={handleBack} data={d} />{assistantPanel}</PageWrapper>;
 
   return (
     <PageWrapper>
@@ -512,7 +521,7 @@ const Index = () => {
       <PatientHeader data={d} />
 
       <div className="mt-5 grid gap-3 xl:grid-cols-[minmax(0,1fr)_320px]">
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:auto-rows-[156px] xl:grid-cols-3">
           {(Object.keys(SUMMARY_CARD_CONFIG) as Array<keyof typeof SUMMARY_CARD_CONFIG>).map((key) => {
             const config = SUMMARY_CARD_CONFIG[key];
             const card = summaryCards[key];
@@ -524,15 +533,90 @@ const Index = () => {
                 title={card?.title || config.section}
                 colorClass={config.colorClass}
                 onClick={() => setActiveSection(config.section)}
-                headerBadge={<SectionProvenanceBadge status={card?.provenanceStatus || d.provenance.sections[key].status} />}
               >
                 {renderSummaryCardContent(key)}
               </SectionCard>
             );
           })}
+
+          <SectionCard
+            icon={<span className="text-base">🧩</span>}
+            title={careGapsCard?.title || "Care Gaps"}
+            colorClass="bg-[hsl(var(--section-pending))]"
+            onClick={() => setActiveSection("pending")}
+          >
+            <div className="flex h-full flex-col justify-between gap-1 overflow-hidden">
+              <div className="flex items-baseline gap-1.5">
+                <span className={CARD_VALUE_CLASS}>{careGapsCard?.headlineMetric || "0"}</span>
+                <span className={CARD_LABEL_CLASS}>{careGapsCard?.secondaryLine || "open care gaps"}</span>
+              </div>
+              <p className="text-[12px] font-medium text-slate-800" style={clampLines(1)}>
+                {careGapsCard?.supportingPoints?.[0] || "No unresolved continuity gaps"}
+              </p>
+              <p className={CARD_META_CLASS} style={clampLines(1)}>
+                {careGapsCard?.supportingPoints?.[1] || "All key follow-through items are covered"}
+              </p>
+            </div>
+          </SectionCard>
+
+        <SectionCard
+          icon={<span className="text-base">📋</span>}
+          title="Discharge Plan"
+          colorClass="bg-[hsl(var(--section-discharge))]"
+          onClick={() => setActiveSection("discharge")}
+          >
+            <div className="flex h-full flex-col justify-between gap-1 overflow-hidden">
+              <p className="text-[12px] font-medium text-slate-800" style={clampLines(1)}>Condition: <span className="font-semibold text-slate-900">{d.dischargePlan.condition}</span></p>
+              <p className={CARD_TEXT_CLASS} style={clampLines(2)}>
+                {d.dischargePlan.dietary.length + d.dischargePlan.activityRestrictions.doNot.length + d.dischargePlan.activityRestrictions.okToDo.length} documented instructions
+              </p>
+              <p className={CARD_META_CLASS} style={clampLines(1)}>
+                {d.dischargePlan.pendingItems.length} Pending • {d.dischargePlan.redFlags.length} Risks
+              </p>
+            </div>
+          </SectionCard>
+
+          <SectionCard
+            icon={<span className="text-base">🛡️</span>}
+            title={riskWatchCard?.title || "Risk Watch"}
+            colorClass="bg-rose-100"
+            onClick={() => setActiveSection("riskwatch")}
+          >
+            <div className="flex h-full flex-col justify-between gap-1 overflow-hidden">
+              <div className="flex items-baseline gap-1.5">
+                <span className={CARD_VALUE_CLASS}>{riskWatchCard?.headlineMetric || "0"}</span>
+                <span className={CARD_LABEL_CLASS}>{riskWatchCard?.secondaryLine || "stable watch"}</span>
+              </div>
+              <p className="text-[12px] font-medium text-slate-800" style={clampLines(1)}>
+                {riskWatchCard?.supportingPoints?.[0] || d.riskWatch.items.slice(0, 2).map((item) => item.summary).join(" · ") || "No active clinical watch items documented"}
+              </p>
+              <p className={CARD_META_CLASS} style={clampLines(1)}>
+                {riskWatchCard?.supportingPoints?.[1] || (d.riskWatch.ewsScore != null ? `EWS ${d.riskWatch.ewsScore}` : "No early warning score documented")}
+              </p>
+            </div>
+          </SectionCard>
+
+          <SectionCard
+            icon={<span className="text-base">📅</span>}
+            title="Next Appointment"
+            colorClass="bg-[hsl(var(--section-followup))]"
+            onClick={() => setActiveSection("followup")}
+          >
+            <div className="flex h-full flex-col justify-between gap-1 overflow-hidden">
+              <div className="flex items-baseline gap-1.5">
+                <span className={CARD_VALUE_CLASS}>{formatDateLabel(d.followUp[0]?.date)}</span>
+              </div>
+              <p className="text-[12px] font-medium text-slate-800" style={clampLines(1)}>
+                {d.followUp[0]?.department || "Not scheduled"}
+              </p>
+              <p className={CARD_META_CLASS} style={clampLines(1)}>
+                {d.followUp.length > 0 ? `${d.followUp.length} appointment${d.followUp.length > 1 ? "s" : ""} planned` : "Needs scheduling"}
+              </p>
+            </div>
+          </SectionCard>
         </div>
 
-        <div className="section-card overflow-hidden border-slate-200 bg-white">
+        <div className="section-card flex min-h-[420px] flex-col overflow-hidden border-slate-200 bg-white xl:h-[492px] xl:min-h-[492px]">
           <div className="border-b border-slate-100 px-3.5 py-3">
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-2">
@@ -551,7 +635,7 @@ const Index = () => {
             </div>
           </div>
 
-          <div className="space-y-2.5 px-3.5 py-3">
+          <div className="space-y-2.5 px-3.5 py-3 flex-1 overflow-y-auto">
             {notesRail.length === 0 ? (
               <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50/80 px-4 py-6 text-center">
                 <p className="text-sm font-medium text-slate-600">No source-backed notes yet</p>
@@ -566,10 +650,10 @@ const Index = () => {
                   </div>
                   <div className="min-w-0 pb-1">
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                      <p className="text-[12px] font-semibold text-slate-800">{item.author || item.title}</p>
+                      <p className="text-[12px] font-medium text-slate-800">{item.author || item.title}</p>
                       {item.timestamp ? <span className="text-[11px] text-slate-400">{item.timestamp}</span> : null}
                     </div>
-                    <p className="mt-0.5 text-[11px] font-medium uppercase tracking-[0.04em] text-slate-500">{item.title}</p>
+                    <p className="mt-0.5 text-[11px] uppercase tracking-[0.04em] text-slate-500">{item.title}</p>
                     <p className="mt-0.5 text-[12px] leading-5 text-slate-600">{item.body || "No summary available."}</p>
                   </div>
                 </div>
@@ -577,49 +661,6 @@ const Index = () => {
             )}
           </div>
         </div>
-      </div>
-
-      <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        <SectionCard
-          icon={<span className="text-base">📝</span>}
-          title="Clinical Handover"
-          colorClass="bg-[hsl(var(--section-notes))]"
-          onClick={() => setActiveSection("notes")}
-          headerBadge={<SectionProvenanceBadge status={d.provenance.sections.handover.status} />}
-        >
-          <p className="text-sm text-foreground"><span className="font-medium">{d.clinicalNotes.totalNotes}</span> Source Notes</p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            {d.clinicalNotes.handover?.overview || `Last Update: ${formatDateLabel(d.clinicalNotes.lastUpdate)}`}
-          </p>
-        </SectionCard>
-
-        <SectionCard
-          icon={<span className="text-base">📋</span>}
-          title="Discharge Plan"
-          colorClass="bg-[hsl(var(--section-discharge))]"
-          onClick={() => setActiveSection("discharge")}
-          headerBadge={<SectionProvenanceBadge status={d.provenance.sections.discharge.status} />}
-        >
-          <p className="text-sm text-foreground">Condition: <span className="font-medium">{d.dischargePlan.condition}</span></p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            {d.dischargePlan.dietary.length + d.dischargePlan.activityRestrictions.doNot.length + d.dischargePlan.activityRestrictions.okToDo.length} documented instructions
-          </p>
-          <p className="text-xs text-muted-foreground">
-            {d.dischargePlan.pendingItems.length} Pending • {d.dischargePlan.redFlags.length} Risks
-          </p>
-        </SectionCard>
-
-        <SectionCard
-          icon={<span className="text-base">📅</span>}
-          title="Follow-Up"
-          colorClass="bg-[hsl(var(--section-followup))]"
-          onClick={() => setActiveSection("followup")}
-          headerBadge={<SectionProvenanceBadge status={d.provenance.sections.followup.status} />}
-        >
-          <p className="text-sm text-foreground">Next: <span className="font-medium">{formatDateLabel(d.followUp[0]?.date)}</span></p>
-          <p className="text-xs text-muted-foreground">{d.followUp[0]?.department || "Follow-up pending"}</p>
-          <p className="mt-1 text-xs text-muted-foreground">{d.followUp.length} appointments total</p>
-        </SectionCard>
       </div>
 
       {assistantPanel}

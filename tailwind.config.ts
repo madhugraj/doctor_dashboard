@@ -33,6 +33,7 @@ export default {
         "section-notes": "hsl(var(--section-notes))",
         "section-discharge": "hsl(var(--section-discharge))",
         "section-followup": "hsl(var(--section-followup))",
+        "section-pending": "hsl(var(--section-pending))",
         primary: {
           DEFAULT: "hsl(var(--primary))",
           foreground: "hsl(var(--primary-foreground))",

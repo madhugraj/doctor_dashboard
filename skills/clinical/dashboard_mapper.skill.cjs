@@ -110,6 +110,13 @@ class DashboardMapperSkill {
           ? treatment.complications.join(", ")
           : "Not documented",
       },
+      riskWatch: {
+        fallRisk: data.risk_scores?.fall_risk || null,
+        dvtRisk: data.risk_scores?.dvt_risk || null,
+        pressureUlcerRisk: data.risk_scores?.pressure_ulcer_risk || null,
+        aspirationRisk: data.risk_scores?.aspiration_risk || null,
+        ewsScore: data.risk_scores?.ews_score ?? null,
+      },
       clinicalNotes: {
         notes: clinicalNotes.map((note) => ({
           type: note.type || "Clinical Note",
@@ -126,6 +133,26 @@ class DashboardMapperSkill {
           handed_over_to: note.handed_over_to || "",
           source_excerpt: Array.isArray(note.source_excerpt) ? note.source_excerpt : [],
         })),
+      },
+      dischargePlan: {
+        pendingItems: Array.isArray(data.pending_items?.pending_discharge_items)
+          ? data.pending_items.pending_discharge_items.map((item) => item?.item || item?.reason || "").filter(Boolean)
+          : [],
+      },
+      pendingItemsSummary: {
+        pending_labs: Array.isArray(data.pending_items?.pending_labs)
+          ? data.pending_items.pending_labs.map((item) => item?.test_name || item?.reason || "").filter(Boolean)
+          : [],
+        pending_radiology: Array.isArray(data.pending_items?.pending_radiology)
+          ? data.pending_items.pending_radiology
+              .map((item) =>
+                [item?.type, item?.body_part ? `of ${item.body_part}` : "", item?.scheduled_date ? `- ${item.scheduled_date}` : ""]
+                  .filter(Boolean)
+                  .join(" ")
+              )
+              .filter(Boolean)
+          : [],
+        medication_reconciliation: data.pending_items?.medication_reconciliation || null,
       },
       followUp: data.follow_up?.appointments || [],
       provenance: {

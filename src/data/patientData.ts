@@ -218,6 +218,15 @@ export const patientData = {
     complicationsDocumented: true,
     complicationsLabel: "None documented",
   },
+  riskWatch: {
+    ewsScore: 2,
+    items: [
+      { label: "Fall", level: "Medium", score: 14, summary: "Fall: Medium (14)" },
+      { label: "Aspiration", level: "Low", score: 2, summary: "Aspiration: Low (2)" },
+      { label: "Pressure Ulcer", level: "Low", score: 1, summary: "Pressure Ulcer: Low (1)" },
+      { label: "DVT", level: "Medium", score: 3, summary: "DVT: Medium (3)" },
+    ],
+  },
   clinicalNotes: {
     totalNotes: 7,
     lastUpdate: "2026-03-20T12:00:00Z",
@@ -376,6 +385,24 @@ export const patientData = {
         supportingPoints: ["Post-procedure medical stabilization", "None documented"],
         status: "normal",
         provenanceStatus: "source_backed",
+      },
+      care_gaps: {
+        section: "pending",
+        title: "Care Gaps",
+        headlineMetric: "5",
+        secondaryLine: "open care gaps",
+        supportingPoints: ["2 labs · 1 imaging pending", "2 discharge actions"],
+        status: "warning",
+        provenanceStatus: "source_backed",
+      },
+      risk_watch: {
+        section: "riskwatch",
+        title: "Risk Watch",
+        headlineMetric: "2",
+        secondaryLine: "elevated watch items",
+        supportingPoints: ["Fall: Medium (14) · DVT: Medium (3)", "EWS 2"],
+        status: "warning",
+        provenanceStatus: "derived_only",
       },
     },
     notesRail: [

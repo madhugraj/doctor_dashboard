@@ -5,6 +5,8 @@ const SectionStatusResolverTool = require("../tools/presentation/section_status_
 
 const SummaryCardBuilderSkill = require("../skills/presentation/summary_card_builder.skill.cjs");
 const NotesRailBuilderSkill = require("../skills/presentation/notes_rail_builder.skill.cjs");
+const CareGapPresentationAgent = require("./care_gap_presentation_agent.cjs");
+const RiskWatchPresentationAgent = require("./risk_watch_presentation_agent.cjs");
 
 class DashboardPresentationAgent {
   constructor(config = {}) {
@@ -19,6 +21,8 @@ class DashboardPresentationAgent {
 
     this.summaryCardBuilder = new SummaryCardBuilderSkill(config);
     this.notesRailBuilder = new NotesRailBuilderSkill(config);
+    this.careGapPresentationAgent = new CareGapPresentationAgent(config);
+    this.riskWatchPresentationAgent = new RiskWatchPresentationAgent(config);
   }
 
   async execute(context) {
@@ -39,11 +43,21 @@ class DashboardPresentationAgent {
       timelineFormatter: this.timelineFormatter,
     });
 
+    const careGapResult = await this.careGapPresentationAgent.execute({ dashboardData });
+    const riskWatchResult = await this.riskWatchPresentationAgent.execute({ dashboardData });
+
     return {
-      success: summaryResult.success && notesResult.success,
+      success: summaryResult.success && notesResult.success && careGapResult.success && riskWatchResult.success,
       step: "dashboard_presentation_agent",
       data: {
-        summary_cards: summaryResult.success ? summaryResult.data : {},
+        summary_cards:
+          summaryResult.success || careGapResult.success || riskWatchResult.success
+            ? {
+                ...(summaryResult.success ? summaryResult.data : {}),
+                ...(careGapResult.success ? careGapResult.data : {}),
+                ...(riskWatchResult.success ? riskWatchResult.data : {}),
+              }
+            : {},
         notes_rail: notesResult.success ? notesResult.data : [],
       },
     };

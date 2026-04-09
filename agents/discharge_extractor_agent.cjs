@@ -15,6 +15,7 @@ const RiskScoresExtractorSkill = require("../skills/extraction/risk_scores_extra
 const VitalsExtractorSkill = require("../skills/extraction/vitals_extractor.skill.cjs");
 const FunctionalStatusExtractorSkill = require("../skills/extraction/functional_status_extractor.skill.cjs");
 const ClinicalDataExtractorSkill = require("../skills/extraction/clinical_data_extractor.skill.cjs");
+const PendingItemsExtractorSkill = require("../skills/extraction/pending_items_extractor.skill.cjs");
 const CrossValidatorSkill = require("../skills/validation/cross_validator.skill.cjs");
 
 class DischargeExtractorAgent {
@@ -37,6 +38,7 @@ class DischargeExtractorAgent {
       new VitalsExtractorSkill(),
       new FunctionalStatusExtractorSkill(),
       new ClinicalDataExtractorSkill(),
+      new PendingItemsExtractorSkill(),
       new CrossValidatorSkill()
     ];
 
@@ -343,6 +345,11 @@ class DischargeExtractorAgent {
           };
         }
 
+        // Merge pending_items (new LLM-based extraction)
+        if (stepData.pending_items) {
+          data.pending_items = stepData.pending_items;
+        }
+
         // Any remaining fields at top level
         Object.keys(stepData).forEach(key => {
           if (!['name', 'mrn', 'age', 'gender', 'admission_date', 'discharge_date', 'los_days',
@@ -350,6 +357,7 @@ class DischargeExtractorAgent {
                'fall_risk', 'dvt_risk', 'pressure_ulcer_risk', 'aspiration_risk', 'ews_score', 'gcs',
                'functional_status', 'overall_assistance_needs', 'mobility_notes',
                'diagnosis', 'allergies', 'medications', 'investigations', 'nursing_needs', 'clinical_notes', 'treatment', 'provenance',
+               'pending_items',
                'document_type', 'sections_identified', 'confidence', 'extraction_strategy',
                'confidence_notes', 'sources', 'validation_notes'].includes(key)) {
             data[key] = stepData[key];

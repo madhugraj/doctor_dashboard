@@ -525,7 +525,121 @@ CRITICAL QUALITY RULES:
 - If information is not available, state "Not documented" rather than omitting
 - Use complete sentences and proper medical terminology
 
-Return the chart note as plain text. Do NOT include markdown formatting or JSON.`
+Return the chart note as plain text. Do NOT include markdown formatting or JSON.`,
+
+      pending_items_extractor: `You are a clinical data specialist extracting PENDING ITEMS from a hospital discharge summary.
+
+CRITICAL RULES:
+1. Use ONLY information explicitly stated in the document
+2. Do NOT infer or assume pending items - they must be explicitly mentioned
+3. Categorize each item correctly (labs, radiology, medications, follow-up, discharge)
+4. Extract the exact wording and any associated dates/times
+5. Identify the priority level based on clinical context
+
+PDF CONTENT:
+{{pdfText}}
+
+Think through this step-by-step:
+
+STEP 1: Identify sections that may contain pending items
+- Look for sections like: "Residents Notes", "Doctor's Handover", "Nursing Endorsement", "Investigations", "Pending Reports"
+- Note any headers or subsections
+
+STEP 2: Extract PENDING LABS
+- Look for phrases like: "SEND BLOOD FOR", "Lab pending", "Awaiting reports", "Investigations ordered"
+- Extract: test name, expected date/time, reason if stated
+- Example: {"test": "Lipid Panel", "expected_date": "March 21, 2026", "reason": "Cardiac risk assessment"}
+
+STEP 3: Extract PENDING RADIOLOGY/IMAGING
+- Look for: CT scans, MRI, X-rays, Ultrasounds, Echocardiograms that are SCHEDULED or PENDING
+- Keywords: "Scheduled", "Pending", "Awaiting", "Planned", followed by imaging modality
+- Extract: imaging type, body part, scheduled date, reason if stated
+- Example: {"type": "CT Chest", "scheduled_date": "March 21, 2026", "reason": "Pulmonary nodule surveillance"}
+
+STEP 4: Extract PENDING FOLLOW-UPS
+- Look for: "Follow-up", "Review", "Appointment", "Outpatient visit"
+- Extract: department/specialty, provider name, date, time, purpose
+- Example: {"department": "Cardiology", "provider": "Dr. Smith", "date": "April 15, 2026", "time": "10:00 AM", "purpose": "Post-MI follow-up"}
+
+STEP 5: Extract MEDICATION RECONCILIATION STATUS
+- Look for: medication lists, allergy documentation, interaction notes
+- Determine: Are medications reconciled? Are there allergies? Any interaction concerns?
+- Categorize as: "complete" or "attention_needed"
+
+STEP 6: Extract DISCHARGE PENDING ITEMS
+- Look for: pending procedures, pending consultations, incomplete documentation
+- These are items that need completion before discharge
+
+STEP 7: Assess PRIORITY for each item
+- HIGH: Critical labs, imaging for acute conditions, medication interactions
+- MEDIUM: Routine follow-ups, non-urgent tests
+- LOW: Optional monitoring, general wellness items
+
+Return ONLY JSON in this exact format:
+{
+  "pending_labs": [
+    {
+      "test_name": "",
+      "expected_date": "",
+      "reason": "",
+      "priority": "high/medium/low",
+      "source_section": "",
+      "source_excerpt": ""
+    }
+  ],
+  "pending_radiology": [
+    {
+      "type": "",
+      "body_part": "",
+      "scheduled_date": "",
+      "reason": "",
+      "priority": "high/medium/low",
+      "source_section": "",
+      "source_excerpt": ""
+    }
+  ],
+  "pending_followups": [
+    {
+      "department": "",
+      "provider": "",
+      "date": "",
+      "time": "",
+      "purpose": "",
+      "priority": "medium",
+      "source_section": "",
+      "source_excerpt": ""
+    }
+  ],
+  "medication_reconciliation": {
+    "status": "complete/attention_needed",
+    "medication_count": 0,
+    "allergy_count": 0,
+    "concerns": "",
+    "source_section": "",
+    "source_excerpt": ""
+  },
+  "pending_discharge_items": [
+    {
+      "item": "",
+      "reason": "",
+      "priority": "high/medium/low",
+      "source_section": "",
+      "source_excerpt": ""
+    }
+  ],
+  "summary": {
+    "total_pending": 0,
+    "needs_attention": 0,
+    "scheduled": 0,
+    "complete": 0
+  }
+}
+
+Remember:
+- Return EMPTY arrays if no pending items of that type are found
+- Do NOT invent items that aren't explicitly mentioned
+- source_excerpt should be the exact text from the PDF that supports this item
+- Leave optional fields empty (not null) if not found`
     }
   };
 

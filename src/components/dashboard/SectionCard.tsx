@@ -14,10 +14,10 @@ const SectionCard = ({ icon, title, colorClass, children, onClick, headerBadge }
   return (
     <button
       onClick={onClick}
-      className="section-card relative w-full overflow-hidden p-3 text-left group"
+      className="section-card group relative flex h-full min-h-[156px] w-full flex-col overflow-hidden px-3 py-2.5 text-left"
     >
       <div className={`absolute inset-x-0 top-0 h-1 ${colorClass}`} />
-      <div className="mb-2 flex items-center justify-between pt-0.5">
+      <div className="mb-1.5 flex items-center justify-between pt-0.5 shrink-0">
         <div className="flex min-w-0 items-center gap-1.5">
           <div className="flex h-7.5 w-7.5 items-center justify-center rounded-lg bg-muted/60">
             {icon}
@@ -31,7 +31,7 @@ const SectionCard = ({ icon, title, colorClass, children, onClick, headerBadge }
           <ChevronRight className="w-3 h-3 text-muted-foreground group-hover:text-foreground transition-colors" />
         </div>
       </div>
-      <div className="space-y-1 text-[12px]">{children}</div>
+      <div className="min-h-0 flex-1 overflow-hidden text-[11px]">{children}</div>
     </button>
   );
 };
