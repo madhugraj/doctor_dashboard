@@ -219,13 +219,8 @@ export const patientData = {
     complicationsLabel: "None documented",
   },
   riskWatch: {
-    ewsScore: 2,
-    items: [
-      { label: "Fall", level: "Medium", score: 14, summary: "Fall: Medium (14)" },
-      { label: "Aspiration", level: "Low", score: 2, summary: "Aspiration: Low (2)" },
-      { label: "Pressure Ulcer", level: "Low", score: 1, summary: "Pressure Ulcer: Low (1)" },
-      { label: "DVT", level: "Medium", score: 3, summary: "DVT: Medium (3)" },
-    ],
+    ewsScore: null,
+    items: [],
   },
   clinicalNotes: {
     totalNotes: 7,
@@ -398,10 +393,10 @@ export const patientData = {
       risk_watch: {
         section: "riskwatch",
         title: "Risk Watch",
-        headlineMetric: "2",
-        secondaryLine: "elevated watch items",
-        supportingPoints: ["Fall: Medium (14) · DVT: Medium (3)", "EWS 2"],
-        status: "warning",
+        headlineMetric: "0",
+        secondaryLine: "not documented",
+        supportingPoints: ["No structured risk scores documented"],
+        status: "neutral",
         provenanceStatus: "derived_only",
       },
     },

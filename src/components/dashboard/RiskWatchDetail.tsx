@@ -17,6 +17,7 @@ const RiskWatchDetail = ({ onBack, data }: RiskWatchDetailProps) => {
   const riskWatch = data.riskWatch;
   const items = riskWatch?.items || [];
   const elevatedItems = items.filter((item) => /high|medium/i.test(String(item.level || "")));
+  const hasStructuredRiskData = items.length > 0 || riskWatch?.ewsScore != null;
 
   return (
     <div className="space-y-6">
@@ -40,7 +41,7 @@ const RiskWatchDetail = ({ onBack, data }: RiskWatchDetailProps) => {
             <div key={item.label} className={`rounded-xl border p-4 ${toneClass[levelKey] || toneClass.unknown}`}>
               <p className="text-[11px] font-medium uppercase tracking-[0.06em]">{item.label}</p>
               <p className="mt-2 text-sm font-semibold leading-5">{item.level || "Unknown"}</p>
-              <p className="mt-1 text-xs text-current/80">{item.score != null ? `Score ${item.score}` : "Score not documented"}</p>
+              {item.score != null ? <p className="mt-1 text-xs text-current/80">{`Score ${item.score}`}</p> : null}
             </div>
           );
         })}
@@ -58,8 +59,10 @@ const RiskWatchDetail = ({ onBack, data }: RiskWatchDetailProps) => {
                   {item.summary}
                 </p>
               ))
+          ) : hasStructuredRiskData ? (
+            <p className="text-sm text-slate-600">No elevated watch items are documented in this record.</p>
           ) : (
-            <p className="text-sm text-slate-600">No elevated clinical watch items are documented in this record.</p>
+            <p className="text-sm text-slate-600">No structured risk scores are documented in this record.</p>
           )}
           {riskWatch?.ewsScore != null ? (
             <p className="text-sm text-slate-600">Early warning score: {riskWatch.ewsScore}</p>

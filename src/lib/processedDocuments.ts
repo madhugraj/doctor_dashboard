@@ -1398,14 +1398,16 @@ export const transformProcessedDocument = (document: ProcessedDocument): Dashboa
       .join(" "),
   ]);
   const riskWatchItems = [
-    { label: "Fall", level: riskScores.fall_risk?.level || "Unknown", score: riskScores.fall_risk?.score ?? null },
-    { label: "Aspiration", level: riskScores.aspiration_risk?.level || "Unknown", score: riskScores.aspiration_risk?.score ?? null },
-    { label: "Pressure Ulcer", level: riskScores.pressure_ulcer_risk?.level || "Unknown", score: riskScores.pressure_ulcer_risk?.score ?? null },
-    { label: "DVT", level: riskScores.dvt_risk?.level || "Unknown", score: riskScores.dvt_risk?.score ?? null },
-  ].map((item) => ({
-    ...item,
-    summary: `${item.label}: ${item.level}${typeof item.score === "number" ? ` (${item.score})` : ""}`,
-  }));
+    { label: "Fall", level: riskScores.fall_risk?.level || "", score: riskScores.fall_risk?.score ?? null },
+    { label: "Aspiration", level: riskScores.aspiration_risk?.level || "", score: riskScores.aspiration_risk?.score ?? null },
+    { label: "Pressure Ulcer", level: riskScores.pressure_ulcer_risk?.level || "", score: riskScores.pressure_ulcer_risk?.score ?? null },
+    { label: "DVT", level: riskScores.dvt_risk?.level || "", score: riskScores.dvt_risk?.score ?? null },
+  ]
+    .filter((item) => item.level || typeof item.score === "number")
+    .map((item) => ({
+      ...item,
+      summary: `${item.label}${item.level ? `: ${item.level}` : ""}${typeof item.score === "number" ? ` (${item.score})` : ""}`,
+    }));
   const elevatedRiskWatchItems = riskWatchItems.filter((item) => /high|medium/i.test(String(item.level || "")));
   const highRiskWatchItems = riskWatchItems.filter((item) => /high/i.test(String(item.level || "")));
   const riskWatchStatus =
@@ -1433,7 +1435,7 @@ export const transformProcessedDocument = (document: ProcessedDocument): Dashboa
           : "elevated watch items"
         : typeof riskScores.ews_score === "number" && riskScores.ews_score > 0
           ? "ews score"
-          : "stable watch";
+          : "not documented";
   const handoverSections = [
     {
       title: "Presentation",
@@ -1842,11 +1844,11 @@ export const transformProcessedDocument = (document: ProcessedDocument): Dashboa
         elevatedRiskWatchItems.length > 0
           ? elevatedRiskWatchItems.slice(0, 2).map((item) => item.summary).join(" · ")
           : riskWatchItems
-              .filter((item) => !/unknown/i.test(String(item.level || "")))
               .slice(0, 2)
               .map((item) => item.summary)
               .join(" · "),
         typeof riskScores.ews_score === "number" ? `EWS ${riskScores.ews_score}` : "",
+        riskWatchItems.length === 0 && typeof riskScores.ews_score !== "number" ? "No structured risk scores documented" : "",
       ]).slice(0, 2),
       status: riskWatchStatus,
       provenanceStatus: "derived_only",
