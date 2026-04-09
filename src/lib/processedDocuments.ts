@@ -1,5 +1,5 @@
-import { patientData, type DashboardPatientData } from "@/data/patientData";
 import { normalizeRiskEntry, normalizeRiskLevel } from "@/lib/riskNormalization";
+import type { DashboardPatientData } from "@/data/patientData";
 
 const API_ROOT = (import.meta.env.VITE_API_URL || "").replace(/\/$/, "");
 
@@ -2209,4 +2209,5 @@ export const transformProcessedDocument = (document: ProcessedDocument): Dashboa
   };
 };
 
-export const fallbackDashboardData = patientData;
+// Note: Fallback data removed to prevent bundling mock data in production
+// The UI handles null/missing data appropriately
