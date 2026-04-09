@@ -15,11 +15,10 @@ import FollowUpDetail from "@/components/dashboard/FollowUpDetail";
 import PendingItemsDetail from "@/components/dashboard/PendingItemsDetail";
 import RiskWatchDetail from "@/components/dashboard/RiskWatchDetail";
 import ChatAssistantPanel from "@/components/dashboard/ChatAssistantPanel";
-import { patientData, type DashboardPatientData } from "@/data/patientData";
+import type { DashboardPatientData } from "@/data/patientData";
 import {
   API_BASE,
   extractProcessedDocumentResponse,
-  fallbackDashboardData,
   getProcessedDocumentMrn,
   getProcessedDocumentPatientName,
   transformProcessedDocument,
@@ -31,6 +30,19 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 
 type Section = null | "vitals" | "diagnosis" | "medications" | "labs" | "radiology" | "treatment" | "notes" | "discharge" | "followup" | "pending" | "riskwatch";
+const SECTIONS = new Set<Exclude<Section, null>>([
+  "vitals",
+  "diagnosis",
+  "medications",
+  "labs",
+  "radiology",
+  "treatment",
+  "notes",
+  "discharge",
+  "followup",
+  "pending",
+  "riskwatch",
+]);
 
 const formatStatusLabel = (value: string) =>
   value
@@ -87,7 +99,6 @@ const NOTE_PRIORITY_STYLES: Record<"normal" | "warning" | "critical", string> = 
 const Index = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const [activeSection, setActiveSection] = useState<Section>(null);
   const [processedDocument, setProcessedDocument] = useState<ProcessedDocument | null>(null);
   const [processedQueue, setProcessedQueue] = useState<ProcessedDocument[]>([]);
   const [recordSearchOpen, setRecordSearchOpen] = useState(false);
@@ -96,12 +107,16 @@ const Index = () => {
   const [isExporting, setIsExporting] = useState(false);
 
   const documentId = searchParams.get("documentId");
-  const d: DashboardPatientData = useMemo(
-    () => (processedDocument?.result ? transformProcessedDocument(processedDocument) : fallbackDashboardData),
+  const activeSectionParam = searchParams.get("section");
+  const activeSection: Section = activeSectionParam && SECTIONS.has(activeSectionParam as Exclude<Section, null>)
+    ? (activeSectionParam as Exclude<Section, null>)
+    : null;
+  const d: DashboardPatientData | null = useMemo(
+    () => (processedDocument?.result ? transformProcessedDocument(processedDocument) : null),
     [processedDocument],
   );
-  const summaryCards = d.presentation?.summaryCards || {};
-  const notesRail = d.presentation?.notesRail || [];
+  const summaryCards = d?.presentation?.summaryCards || {};
+  const notesRail = d?.presentation?.notesRail || [];
   const careGapsCard = summaryCards.care_gaps;
   const riskWatchCard = summaryCards.risk_watch;
 
@@ -233,7 +248,20 @@ const Index = () => {
     );
   };
 
-  const handleBack = () => setActiveSection(null);
+  const updateSection = (section: Section) => {
+    const params = new URLSearchParams(searchParams);
+    if (section) params.set("section", section);
+    else params.delete("section");
+    navigate(`/dashboard${params.toString() ? `?${params.toString()}` : ""}`);
+  };
+
+  const handleBack = () => updateSection(null);
+
+  useEffect(() => {
+    if (!documentId) {
+      navigate("/", { replace: true });
+    }
+  }, [documentId, navigate]);
 
   useEffect(() => {
     fetch(`${API_BASE}/documents`)
@@ -459,6 +487,38 @@ const Index = () => {
     />
   );
 
+  if (!documentId) return null;
+
+  if (isLoading && !d) {
+    return (
+      <PageWrapper>
+        {dashboardToolbar}
+        <div className="rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-600">
+          Loading processed document...
+        </div>
+      </PageWrapper>
+    );
+  }
+
+  if (!d) {
+    return (
+      <PageWrapper>
+        {dashboardToolbar}
+        <div className="rounded-xl border border-rose-200 bg-rose-50 p-6">
+          <h2 className="text-base font-semibold text-rose-900">Processed document unavailable</h2>
+          <p className="mt-2 text-sm text-rose-700">
+            {loadError || "This processed record could not be loaded."}
+          </p>
+          <div className="mt-4">
+            <Button onClick={() => navigate("/")} className="bg-rose-600 text-white hover:bg-rose-700">
+              Back to Queue
+            </Button>
+          </div>
+        </div>
+      </PageWrapper>
+    );
+  }
+
   if (activeSection === "vitals") return <PageWrapper>{dashboardToolbar}<VitalsDetail onBack={handleBack} data={d} />{assistantPanel}</PageWrapper>;
   if (activeSection === "diagnosis") return <PageWrapper>{dashboardToolbar}<DiagnosisDetail onBack={handleBack} data={d} />{assistantPanel}</PageWrapper>;
   if (activeSection === "medications") return <PageWrapper>{dashboardToolbar}<MedicationsDetail onBack={handleBack} data={d} />{assistantPanel}</PageWrapper>;
@@ -482,8 +542,8 @@ const Index = () => {
               {isLoading
                 ? "Loading processed document..."
                 : loadError
-                  ? `${loadError} Showing fallback sample dashboard.`
-                  : `Showing processed output for ${processedDocument?.name || patientData.patient.name}.`}
+                  ? loadError
+                  : `Showing processed output for ${processedDocument?.name || "processed document"}.`}
             </div>
             {processedDocument?.agentInfo && (
               <div className="flex items-center gap-4 text-xs">
@@ -532,7 +592,7 @@ const Index = () => {
                 icon={<span className="text-base">{config.icon}</span>}
                 title={card?.title || config.section}
                 colorClass={config.colorClass}
-                onClick={() => setActiveSection(config.section)}
+                onClick={() => updateSection(config.section)}
               >
                 {renderSummaryCardContent(key)}
               </SectionCard>
@@ -543,7 +603,7 @@ const Index = () => {
             icon={<span className="text-base">🧩</span>}
             title={careGapsCard?.title || "Care Gaps"}
             colorClass="bg-[hsl(var(--section-pending))]"
-            onClick={() => setActiveSection("pending")}
+            onClick={() => updateSection("pending")}
           >
             <div className="flex h-full flex-col justify-between gap-1 overflow-hidden">
               <div className="flex items-baseline gap-1.5">
@@ -563,7 +623,7 @@ const Index = () => {
           icon={<span className="text-base">📋</span>}
           title="Discharge Plan"
           colorClass="bg-[hsl(var(--section-discharge))]"
-          onClick={() => setActiveSection("discharge")}
+          onClick={() => updateSection("discharge")}
           >
             <div className="flex h-full flex-col justify-between gap-1 overflow-hidden">
               <p className="text-[12px] font-medium text-slate-800" style={clampLines(1)}>Condition: <span className="font-semibold text-slate-900">{d.dischargePlan.condition}</span></p>
@@ -580,7 +640,7 @@ const Index = () => {
             icon={<span className="text-base">🛡️</span>}
             title={riskWatchCard?.title || "Risk Watch"}
             colorClass="bg-rose-100"
-            onClick={() => setActiveSection("riskwatch")}
+            onClick={() => updateSection("riskwatch")}
           >
             <div className="flex h-full flex-col justify-between gap-1 overflow-hidden">
               <div className="flex items-baseline gap-1.5">
@@ -600,7 +660,7 @@ const Index = () => {
             icon={<span className="text-base">📅</span>}
             title="Next Appointment"
             colorClass="bg-[hsl(var(--section-followup))]"
-            onClick={() => setActiveSection("followup")}
+            onClick={() => updateSection("followup")}
           >
             <div className="flex h-full flex-col justify-between gap-1 overflow-hidden">
               <div className="flex items-baseline gap-1.5">
@@ -623,12 +683,12 @@ const Index = () => {
                 <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-50 text-base">📝</div>
                 <div>
                   <h3 className="text-[13px] font-semibold text-slate-900">Notes</h3>
-                  <p className="text-[11px] text-slate-400">{notesRail.length} today</p>
+                <p className="text-[11px] text-slate-400">{notesRail.length} today</p>
                 </div>
               </div>
               <button
                 className="text-[11px] font-medium text-blue-600 transition-colors hover:text-blue-700"
-                onClick={() => setActiveSection("notes")}
+                onClick={() => updateSection("notes")}
               >
                 Open
               </button>

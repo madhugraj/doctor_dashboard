@@ -1,4 +1,5 @@
 import { patientData, type DashboardPatientData } from "@/data/patientData";
+import { normalizeRiskEntry, normalizeRiskLevel } from "@/lib/riskNormalization";
 
 const API_ROOT = (import.meta.env.VITE_API_URL || "").replace(/\/$/, "");
 
@@ -656,6 +657,20 @@ const dedupeStrings = (items: Array<string | null | undefined>) => {
   return output;
 };
 
+const dedupeBy = <T,>(items: T[], getKey: (item: T) => string) => {
+  const seen = new Set<string>();
+  const output: T[] = [];
+
+  for (const item of items) {
+    const key = getKey(item);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    output.push(item);
+  }
+
+  return output;
+};
+
 const dedupeMedicationEntries = <
   T extends {
     name?: string;
@@ -996,6 +1011,14 @@ const toSentence = (value: string) => {
   return /[.!?]$/.test(trimmed) ? trimmed : `${trimmed}.`;
 };
 
+const riskWatchAliases: Record<string, string[]> = {
+  Fall: ["fall", "falls", "fall risk"],
+  Aspiration: ["aspiration", "aspiration risk"],
+  "Pressure Ulcer": ["pressure", "pressure ulcer", "pressure sore", "braden"],
+  DVT: ["dvt", "deep vein thrombosis", "dvt risk"],
+  EWS: ["ews", "early warning score"],
+};
+
 export const transformProcessedDocument = (document: ProcessedDocument): DashboardPatientData => {
   const result = document.result || {};
   const cards = result.dashboard_cards || {};
@@ -1228,7 +1251,14 @@ export const transformProcessedDocument = (document: ProcessedDocument): Dashboa
   const handoverNote = explicitClinicalNotes.find((note) => /handover/i.test(note.type));
   const residentNote = explicitClinicalNotes.find((note) => /resident/i.test(note.type));
   const admissionNote = explicitClinicalNotes.find((note) => /initial assessment|admission/i.test(note.type));
-  const riskScores = extracted.risk_scores || {};
+  const rawRiskScores = extracted.risk_scores || {};
+  const riskScores = {
+    ...rawRiskScores,
+    fall_risk: normalizeRiskEntry(rawRiskScores.fall_risk),
+    dvt_risk: normalizeRiskEntry(rawRiskScores.dvt_risk),
+    pressure_ulcer_risk: normalizeRiskEntry(rawRiskScores.pressure_ulcer_risk),
+    aspiration_risk: normalizeRiskEntry(rawRiskScores.aspiration_risk),
+  };
   const derivedComorbidities = dedupeStrings([
     ...(Array.isArray(extractedDiagnosis.comorbidities) ? extractedDiagnosis.comorbidities : []),
     ...secondaryDiagnoses.filter((item) => isComorbidityLikeDiagnosis(item)),
@@ -1388,27 +1418,60 @@ export const transformProcessedDocument = (document: ProcessedDocument): Dashboa
     ? safeTreatmentProcedureItems.map((item) => item.value)
     : explicitProcedures;
   const riskItems = dedupeStrings([
-    riskScores.fall_risk?.level ? `Fall risk ${riskScores.fall_risk.level}${riskScores.fall_risk.score ? ` (score ${riskScores.fall_risk.score})` : ""}` : "",
-    riskScores.aspiration_risk?.level ? `Aspiration risk ${riskScores.aspiration_risk.level}${riskScores.aspiration_risk.score ? ` (score ${riskScores.aspiration_risk.score})` : ""}` : "",
-    riskScores.pressure_ulcer_risk?.level ? `Pressure ulcer risk ${riskScores.pressure_ulcer_risk.level}${riskScores.pressure_ulcer_risk.score ? ` (score ${riskScores.pressure_ulcer_risk.score})` : ""}` : "",
-    riskScores.dvt_risk?.level ? `DVT risk ${riskScores.dvt_risk.level}${riskScores.dvt_risk.score ? ` (score ${riskScores.dvt_risk.score})` : ""}` : "",
+    riskScores.fall_risk?.level ? `Fall risk ${riskScores.fall_risk.level}` : "",
+    riskScores.aspiration_risk?.level ? `Aspiration risk ${riskScores.aspiration_risk.level}` : "",
+    riskScores.pressure_ulcer_risk?.level ? `Pressure ulcer risk ${riskScores.pressure_ulcer_risk.level}` : "",
+    riskScores.dvt_risk?.level ? `DVT risk ${riskScores.dvt_risk.level}` : "",
     allergies
       .filter((allergen) => !allergen.toLowerCase().includes("nkf") && !allergen.toLowerCase().includes("not known"))
       .map((allergen) => `Allergy documented: ${allergen}`)
       .join(" "),
   ]);
+  const buildRiskWatchCitations = (label: string, score: number | null, level: string) => {
+    const aliases = riskWatchAliases[label] || [label.toLowerCase()];
+    const citations = explicitClinicalNotes.flatMap((note) => {
+      const noteCandidates = [note.summary, note.assessment, note.recommendations, ...note.source_excerpt]
+        .map((value) => String(value || "").trim())
+        .filter(Boolean);
+      const matchingExcerpt = noteCandidates.find((candidate) => {
+        const normalized = candidate.toLowerCase();
+        const aliasMatch = aliases.some((alias) => normalized.includes(alias));
+        const scoreMatch = typeof score === "number" ? normalized.includes(String(score)) : false;
+        const levelMatch = level ? normalized.includes(level.toLowerCase()) : false;
+        return aliasMatch && (scoreMatch || levelMatch || /risk/.test(normalized));
+      });
+
+      if (!matchingExcerpt) return [];
+      return [{
+        value: `${label}${level ? `: ${level}` : ""}`,
+        sourceSection: note.type || "Clinical Note",
+        sourceExcerpt: matchingExcerpt,
+        sourcePage: null,
+        confidence: 0.7,
+        provenanceType: "normalized" as const,
+      }];
+    });
+
+    return dedupeBy(citations, (item) => `${item.sourceSection}|${item.sourceExcerpt}`);
+  };
   const riskWatchItems = [
     { label: "Fall", level: riskScores.fall_risk?.level || "", score: riskScores.fall_risk?.score ?? null },
     { label: "Aspiration", level: riskScores.aspiration_risk?.level || "", score: riskScores.aspiration_risk?.score ?? null },
     { label: "Pressure Ulcer", level: riskScores.pressure_ulcer_risk?.level || "", score: riskScores.pressure_ulcer_risk?.score ?? null },
     { label: "DVT", level: riskScores.dvt_risk?.level || "", score: riskScores.dvt_risk?.score ?? null },
   ]
-    .filter((item) => item.level || typeof item.score === "number")
+    .filter((item) => item.level)
     .map((item) => ({
       ...item,
-      summary: `${item.label}${item.level ? `: ${item.level}` : ""}${typeof item.score === "number" ? ` (${item.score})` : ""}`,
+      summary: `${item.label}${item.level ? `: ${item.level}` : ""}`,
+      citations: buildRiskWatchCitations(item.label, item.score, item.level),
     }));
-  const elevatedRiskWatchItems = riskWatchItems.filter((item) => /high|medium/i.test(String(item.level || "")));
+  const riskWatchSectionProvenance = buildSectionProvenance(
+    riskWatchItems.flatMap((item) => item.citations || []),
+    ["quoted", "normalized"]
+  );
+  const elevatedRiskWatchItems = riskWatchItems.filter((item) => /high|moderate/i.test(String(item.level || "")));
+  const documentedRiskWatchItems = riskWatchItems.filter((item) => Boolean(normalizeRiskLevel(item.level)));
   const highRiskWatchItems = riskWatchItems.filter((item) => /high/i.test(String(item.level || "")));
   const riskWatchStatus =
     typeof riskScores.ews_score === "number" && riskScores.ews_score >= 5
@@ -1433,6 +1496,10 @@ export const transformProcessedDocument = (document: ProcessedDocument): Dashboa
         ? elevatedRiskWatchItems.length === 1
           ? "elevated watch item"
           : "elevated watch items"
+        : documentedRiskWatchItems.length > 0
+          ? documentedRiskWatchItems.length === 1
+            ? "watch item documented"
+            : "watch items documented"
         : typeof riskScores.ews_score === "number" && riskScores.ews_score > 0
           ? "ews score"
           : "not documented";
@@ -1843,15 +1910,14 @@ export const transformProcessedDocument = (document: ProcessedDocument): Dashboa
       supportingPoints: dedupeStrings([
         elevatedRiskWatchItems.length > 0
           ? elevatedRiskWatchItems.slice(0, 2).map((item) => item.summary).join(" · ")
-          : riskWatchItems
+          : documentedRiskWatchItems
               .slice(0, 2)
               .map((item) => item.summary)
               .join(" · "),
-        typeof riskScores.ews_score === "number" ? `EWS ${riskScores.ews_score}` : "",
-        riskWatchItems.length === 0 && typeof riskScores.ews_score !== "number" ? "No structured risk scores documented" : "",
+        documentedRiskWatchItems.length === 0 && typeof riskScores.ews_score !== "number" ? "No explicit risk levels documented" : "",
       ]).slice(0, 2),
       status: riskWatchStatus,
-      provenanceStatus: "derived_only",
+      provenanceStatus: riskWatchSectionProvenance.status,
     },
   };
   const normalizedPresentationSummaryCards = Object.fromEntries(
@@ -1872,7 +1938,7 @@ export const transformProcessedDocument = (document: ProcessedDocument): Dashboa
   ) as Record<string, PresentationCard>;
   const presentationSummaryCards =
     Object.keys(normalizedPresentationSummaryCards).length > 0
-      ? { ...fallbackPresentationSummaryCards, ...normalizedPresentationSummaryCards }
+      ? { ...fallbackPresentationSummaryCards, ...normalizedPresentationSummaryCards, risk_watch: fallbackPresentationSummaryCards.risk_watch }
       : fallbackPresentationSummaryCards;
   const fallbackNotesRail: PresentationRailItem[] = handoverNotes
     .slice(0, 6)
@@ -2134,6 +2200,7 @@ export const transformProcessedDocument = (document: ProcessedDocument): Dashboa
         labs: labsSectionProvenance,
         radiology: radiologySectionProvenance,
         treatment: treatmentSectionProvenance,
+        riskwatch: riskWatchSectionProvenance,
         handover: handoverSectionProvenance,
         followup: followUpSectionProvenance,
         discharge: dischargeSectionProvenance,

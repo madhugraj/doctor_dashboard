@@ -24,7 +24,7 @@ class RiskWatchBuilderSkill {
           secondary_line: summary.secondaryLine,
           supporting_points: summary.supportingPoints,
           status: summary.status,
-          provenance_status: "derived_only",
+          provenance_status: dashboardData?.provenance?.sections?.riskwatch?.status || "insufficient_evidence",
         },
       },
     };

@@ -1,3 +1,5 @@
+const { normalizeRiskEntry } = require("../../lib/clinical/risk_level_normalizer.cjs");
+
 class RiskWatchResolverTool {
   constructor(config = {}) {
     this.name = "Risk Watch Resolver";
@@ -16,13 +18,14 @@ class RiskWatchResolverTool {
   }
 
   buildRisk(label, risk = {}) {
-    const level = this.titleCase(risk.level || "Unknown");
-    const score = typeof risk.score === "number" ? risk.score : null;
+    const normalized = normalizeRiskEntry(risk);
+    if (!normalized.level) return null;
+
+    const level = normalized.level;
     return {
       label,
       level,
-      score,
-      summary: `${label}: ${level}${score != null ? ` (${score})` : ""}`,
+      summary: `${label}: ${level}`,
     };
   }
 
@@ -33,10 +36,10 @@ class RiskWatchResolverTool {
       this.buildRisk("Aspiration", riskScores.aspirationRisk),
       this.buildRisk("Pressure Ulcer", riskScores.pressureUlcerRisk),
       this.buildRisk("DVT", riskScores.dvtRisk),
-    ];
+    ].filter(Boolean);
 
     const highItems = items.filter((item) => item.level === "High");
-    const mediumItems = items.filter((item) => item.level === "Medium");
+    const mediumItems = items.filter((item) => item.level === "Moderate");
     const ewsScore = typeof riskScores.ewsScore === "number" ? riskScores.ewsScore : null;
 
     let status = "normal";
@@ -55,9 +58,13 @@ class RiskWatchResolverTool {
         ? highItems.length === 1
           ? "high-risk signal"
           : "high-risk signals"
+        : items.length > 0
+          ? items.length === 1
+            ? "watch item documented"
+            : "watch items documented"
         : ewsScore != null && ewsScore > 0
           ? "ews score"
-          : "stable watch";
+          : "not documented";
 
     const supportingPoints = [];
     if (highItems.length > 0) {

@@ -4,6 +4,7 @@
  */
 const DashboardPresentationAgent = require("../../agents/dashboard_presentation_agent.cjs");
 const SectionStatusResolverTool = require("../../tools/presentation/section_status_resolver.tool.cjs");
+const { normalizeRiskEntry, normalizeRiskLevel } = require("../../lib/clinical/risk_level_normalizer.cjs");
 
 class DashboardMapperSkill {
   constructor(config = {}) {
@@ -111,10 +112,10 @@ class DashboardMapperSkill {
           : "Not documented",
       },
       riskWatch: {
-        fallRisk: data.risk_scores?.fall_risk || null,
-        dvtRisk: data.risk_scores?.dvt_risk || null,
-        pressureUlcerRisk: data.risk_scores?.pressure_ulcer_risk || null,
-        aspirationRisk: data.risk_scores?.aspiration_risk || null,
+        fallRisk: normalizeRiskEntry(data.risk_scores?.fall_risk),
+        dvtRisk: normalizeRiskEntry(data.risk_scores?.dvt_risk),
+        pressureUlcerRisk: normalizeRiskEntry(data.risk_scores?.pressure_ulcer_risk),
+        aspirationRisk: normalizeRiskEntry(data.risk_scores?.aspiration_risk),
         ewsScore: data.risk_scores?.ews_score ?? null,
       },
       clinicalNotes: {
@@ -544,8 +545,8 @@ class DashboardMapperSkill {
   countCriticalLabs(riskScores) {
     let count = 0;
     if (riskScores.ews_score >= 7) count++;
-    if (riskScores.fall_risk?.level === "High") count++;
-    if (riskScores.aspiration_risk?.level === "High") count++;
+    if (normalizeRiskLevel(riskScores.fall_risk?.level) === "High") count++;
+    if (normalizeRiskLevel(riskScores.aspiration_risk?.level) === "High") count++;
     return count;
   }
 
@@ -558,19 +559,20 @@ class DashboardMapperSkill {
   }
 
   formatRisk(risk) {
-    if (!risk) return { score: 0, level: "Not assessed" };
+    const normalized = normalizeRiskEntry(risk);
+    if (!normalized.level) return { score: 0, level: "Not assessed" };
     return {
-      score: risk.score || 0,
-      level: risk.level || "Unknown"
+      score: normalized.score || 0,
+      level: normalized.level
     };
   }
 
   determineOverallRiskStatus(riskScores) {
     const highRisks = [];
-    if (riskScores.fall_risk?.level === "High") highRisks.push("Fall");
-    if (riskScores.dvt_risk?.level === "High") highRisks.push("DVT");
-    if (riskScores.pressure_ulcer_risk?.level === "High") highRisks.push("Pressure Ulcer");
-    if (riskScores.aspiration_risk?.level === "High") highRisks.push("Aspiration");
+    if (normalizeRiskLevel(riskScores.fall_risk?.level) === "High") highRisks.push("Fall");
+    if (normalizeRiskLevel(riskScores.dvt_risk?.level) === "High") highRisks.push("DVT");
+    if (normalizeRiskLevel(riskScores.pressure_ulcer_risk?.level) === "High") highRisks.push("Pressure Ulcer");
+    if (normalizeRiskLevel(riskScores.aspiration_risk?.level) === "High") highRisks.push("Aspiration");
 
     if (highRisks.length >= 2) return "critical";
     if (highRisks.length === 1) return "warning";

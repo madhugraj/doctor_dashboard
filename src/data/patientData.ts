@@ -221,6 +221,7 @@ export const patientData = {
   riskWatch: {
     ewsScore: null,
     items: [],
+    citations: [],
   },
   clinicalNotes: {
     totalNotes: 7,
@@ -524,6 +525,11 @@ export const patientData = {
             provenanceType: "normalized",
           },
         ],
+      },
+      riskwatch: {
+        status: "insufficient_evidence",
+        hasRaw: false,
+        items: [],
       },
       handover: {
         status: "mixed",

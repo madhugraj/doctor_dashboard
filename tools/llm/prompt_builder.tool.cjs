@@ -74,7 +74,11 @@ Think through this step-by-step:
 
 For EACH score found:
 - Verify the numeric value
-- Note the risk level (Low/Moderate/High/Highest)
+- Capture the risk level ONLY if the document explicitly states it
+- Allowed level values are exactly: "No Risk", "Low", "Moderate", "High"
+- If a score is present but the level is not explicitly stated, set "level" to an empty string
+- Do NOT infer, explain, or paraphrase the level from the score
+- Put any discrepancies or interpretation concerns only in "validation_notes"
 - Cross-check if multiple mentions exist
 
 Return ONLY JSON:

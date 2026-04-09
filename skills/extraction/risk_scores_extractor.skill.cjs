@@ -2,6 +2,7 @@
  * Risk Scores Extractor Skill
  * Extracts and validates risk scores with cross-verification
  */
+const { normalizeRiskEntry } = require("../../lib/clinical/risk_level_normalizer.cjs");
 
 class RiskScoresExtractorSkill {
   constructor(config = {}) {
@@ -49,15 +50,25 @@ class RiskScoresExtractorSkill {
       };
     }
 
-    // Validate the extracted data
-    const validation = this.validate(data);
+    const normalizedData = this.normalize(data);
+    const validation = this.validate(normalizedData);
 
     return {
       success: true,
       step: "risk_scores_extractor",
-      data: data,
+      data: normalizedData,
       validation: validation,
       usage: result.usage
+    };
+  }
+
+  normalize(data) {
+    return {
+      ...data,
+      fall_risk: normalizeRiskEntry(data.fall_risk),
+      dvt_risk: normalizeRiskEntry(data.dvt_risk),
+      pressure_ulcer_risk: normalizeRiskEntry(data.pressure_ulcer_risk),
+      aspiration_risk: normalizeRiskEntry(data.aspiration_risk),
     };
   }
 
@@ -67,13 +78,9 @@ class RiskScoresExtractorSkill {
   validate(data) {
     const issues = [];
 
-    // Check required fields
-    if (!data.fall_risk) {
-      issues.push("Fall risk not found");
-    }
-    if (!data.dvt_risk) {
-      issues.push("DVT risk not found");
-    }
+    // Check required structures
+    if (!data.fall_risk) issues.push("Fall risk not found");
+    if (!data.dvt_risk) issues.push("DVT risk not found");
 
     // Validate score ranges
     if (data.fall_risk?.score !== undefined) {
@@ -88,7 +95,7 @@ class RiskScoresExtractorSkill {
       }
     }
 
-    if (data.pressure_ulcer_risk?.score !== undefined) {
+    if (data.pressure_ulcer_risk?.score !== undefined && data.pressure_ulcer_risk?.score !== null) {
       if (data.pressure_ulcer_risk.score < 0 || data.pressure_ulcer_risk.score > 23) {
         issues.push(`Pressure ulcer score out of range: ${data.pressure_ulcer_risk.score}`);
       }
