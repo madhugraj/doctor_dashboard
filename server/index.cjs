@@ -1,4 +1,5 @@
 const cors = require("cors");
+const crypto = require("crypto");
 const express = require("express");
 const fs = require("fs/promises");
 const multer = require("multer");
@@ -46,6 +47,15 @@ app.get('/test-agent', (req, res) => {
 function publicDocument(document) {
   const { filePath, ...rest } = document;
   return rest;
+}
+
+/**
+ * Compute SHA-256 hash of a buffer
+ * @param {Buffer} buffer - File content buffer
+ * @returns {string} Hex-encoded SHA-256 hash
+ */
+function computeHash(buffer) {
+  return crypto.createHash("sha256").update(buffer).digest("hex");
 }
 
 async function ensureStorage() {
@@ -395,8 +405,32 @@ app.post("/api/documents/upload", upload.array("files"), async (req, res) => {
   }
 
   const uploaded = [];
+  const duplicates = [];
+  const existingDocuments = await readDocuments();
+
+  // Build a map of existing hashes for quick lookup
+  const existingHashes = new Map();
+  for (const doc of existingDocuments) {
+    if (doc.hash) {
+      existingHashes.set(doc.hash, doc);
+    }
+  }
+
   await mutateDocuments(async (documents) => {
     for (const file of files) {
+      // Compute hash of the file content
+      const hash = computeHash(file.buffer);
+
+      // Check if this file already exists
+      const existingDoc = existingHashes.get(hash);
+      if (existingDoc) {
+        duplicates.push({
+          name: file.originalname,
+          existingDocument: publicDocument(existingDoc),
+        });
+        continue;
+      }
+
       const id = crypto.randomUUID();
       const extension = path.extname(file.originalname) || ".pdf";
       const filePath = path.join(uploadsDir, `${id}${extension}`);
@@ -411,6 +445,7 @@ app.post("/api/documents/upload", upload.array("files"), async (req, res) => {
         status: "queued",
         department: inferDepartment(file.originalname),
         filePath,
+        hash,
         result: null,
         error: null,
       };
@@ -420,7 +455,7 @@ app.post("/api/documents/upload", upload.array("files"), async (req, res) => {
     }
   });
 
-  res.status(201).json({ documents: uploaded });
+  res.status(201).json({ documents: uploaded, duplicates });
 });
 
 app.post("/api/documents/process", async (req, res) => {

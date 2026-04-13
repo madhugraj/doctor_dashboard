@@ -130,9 +130,22 @@ const UploadCenter = () => {
         throw new Error("Upload failed.");
       }
 
+      const result = await response.json();
+      const { documents: uploaded, duplicates = [] } = result;
+
       await loadDocuments();
       setActiveTab("all");
-      toast.success(`${pdfFiles.length} PDF${pdfFiles.length > 1 ? "s" : ""} added to the queue.`);
+
+      // Show results
+      if (uploaded.length > 0) {
+        toast.success(`${uploaded.length} PDF${uploaded.length > 1 ? "s" : ""} added to the queue.`);
+      }
+
+      // Show duplicates info
+      if (duplicates.length > 0) {
+        const duplicateNames = duplicates.map((d: { name: string }) => d.name).join(", ");
+        toast.info(`${duplicates.length} duplicate file${duplicates.length > 1 ? "s were" : " was"} skipped: ${duplicateNames}`);
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Upload failed.");
     } finally {
