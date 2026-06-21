@@ -55,12 +55,14 @@ class LiveConversationWebSocket {
     this.draftBuffer = new Map();
     this.chunkFlushTimers = new Map();
     this.sessionChunkFiles = new Map(); // Track chunk files for each session
+    this.sessionChunkCount = new Map(); // Track flushed chunk file sequence per session
     this.transcriptionQueues = new Map();
     this.upgradeHandler = null;
     this.attachedServer = null;
 
     // PR-2: Live transcript cadence instrumentation
     this.transcriptMetrics = new Map(); // Track timing metrics per session
+    this.lastTranscribedChunkIndex = new Map(); // Track last successfully transcribed chunk index per session
     this.config = {
       pingInterval: Number(config.pingInterval || 30000),
       chunkFlushMs: Number(config.chunkFlushMs || 2500), // PR-2: Slightly reduce from 3000ms to 2500ms for more frequent updates
@@ -69,6 +71,8 @@ class LiveConversationWebSocket {
       enableLiveTranscription: config.enableLiveTranscription ?? process.env.ENABLE_LIVE_TRANSCRIPTION === "true",
       enableLiveDraftExtraction: config.enableLiveDraftExtraction ?? process.env.ENABLE_LIVE_DRAFT_EXTRACTION === "true",
       enableDraftExtraction: config.enableDraftExtraction ?? true,
+      enableFinalGeminiFallback: config.enableFinalGeminiFallback
+        ?? process.env.LIVE_FINAL_STT_ENABLE_GEMINI_FALLBACK !== "false",
       draftExtractionInterval: Number(config.draftExtractionInterval || 15000),
       debug: config.debug || false,
       enableGroundedMedicationVerification,
@@ -83,6 +87,14 @@ class LiveConversationWebSocket {
     if (this.config.debug) {
       console.log(`[LiveConversationWS] ${message}`, data);
     }
+  }
+
+  logProcessing(sessionId, step, data = {}) {
+    const timestamp = new Date().toISOString();
+    console.log(`[LiveConversation][${sessionId}] ${step}`, {
+      timestamp,
+      ...data,
+    });
   }
 
   normalizeTranscriptText(value = "") {
@@ -844,20 +856,37 @@ class LiveConversationWebSocket {
   }
 
   async backfillFinalTranscriptAndDraft(sessionId, combinedAudioPath, options = {}) {
-    if (!combinedAudioPath) return;
+    if (!combinedAudioPath) {
+      this.logProcessing(sessionId, "final_transcript_skipped", {
+        reason: "missing_audio_path",
+      });
+      await this.store.logEvent(sessionId, "final_transcript_backfill_skipped", {
+        reason: "missing_audio_path",
+      }).catch(() => undefined);
+      return;
+    }
 
     let session = await this.store.get(sessionId);
     if (!session) return;
 
     if (this.shouldBackfillTranscript(session, options)) {
+      let result = null;
       try {
-        const result = await this.sttAgent.execute({
+        const sttStartedAt = Date.now();
+        this.logProcessing(sessionId, "final_stt_started", {
+          audioFile: path.basename(combinedAudioPath),
+          mimeType: session.audio?.mimeType || null,
+          expectedDurationMs: Number(options.expectedDurationMs || 0),
+          geminiFallbackEnabled: Boolean(this.config.enableFinalGeminiFallback),
+          speakerDiarizationEnabled: false,
+        });
+        result = await this.sttAgent.execute({
           audioPath: combinedAudioPath,
           options: {
             mode: "fixed_window_no_vad",
             windowSeconds: 15,
             enableSpeakerDiarization: false,
-            enableGeminiFallback: false,
+            enableGeminiFallback: Boolean(this.config.enableFinalGeminiFallback),
             rejectClinicalNoteArtifacts: true,
             browserWhisperAttempts: 3,
             skipValidation: false,
@@ -873,6 +902,15 @@ class LiveConversationWebSocket {
           : null;
 
         if (transcriptData) {
+          const transcriptTextLength = String(
+            transcriptData.normalizedText || transcriptData.rawText || "",
+          ).trim().length;
+          this.logProcessing(sessionId, "final_stt_completed", {
+            backend: result.backend || result?.data?.metadata?.backend || null,
+            elapsedMs: Date.now() - sttStartedAt,
+            transcriptLength: transcriptTextLength,
+            segmentCount: Array.isArray(transcriptData.segments) ? transcriptData.segments.length : 0,
+          });
           const candidateExpectedDurationMs = Number.isFinite(Number(transcriptData?.metadata?.audioDuration))
             ? Math.round(Number(transcriptData.metadata.audioDuration) * 1000)
             : Number(options.expectedDurationMs || session.durationMs || 0);
@@ -897,16 +935,56 @@ class LiveConversationWebSocket {
               backend: result.backend || result?.data?.metadata?.backend || null,
               segmentCount: transcriptData.segments?.length || 0,
             });
+            this.logProcessing(sessionId, "final_transcript_saved", {
+              backend: result.backend || result?.data?.metadata?.backend || null,
+              segmentCount: transcriptData.segments?.length || 0,
+              transcriptLength: transcriptTextLength,
+            });
             session = await this.store.get(sessionId);
           } else {
             await this.store.logEvent(sessionId, "final_transcript_kept_existing", {
               backend: result.backend || result?.data?.metadata?.backend || null,
               candidateSegmentCount: transcriptData.segments?.length || 0,
             });
+            this.logProcessing(sessionId, "final_transcript_kept_existing", {
+              backend: result.backend || result?.data?.metadata?.backend || null,
+              candidateSegmentCount: transcriptData.segments?.length || 0,
+            });
           }
+        } else {
+          const failureMessage = String(result?.error || "Final STT returned no usable transcript").slice(0, 1000);
+          this.logProcessing(sessionId, "final_stt_failed", {
+            backend: result?.backend || result?.data?.metadata?.backend || null,
+            error: failureMessage,
+          });
+          await this.store.logEvent(sessionId, "final_transcript_backfill_failed", {
+            backend: result?.backend || result?.data?.metadata?.backend || null,
+            error: failureMessage,
+          });
+          await this.persistTransportState(sessionId, {
+            lastError: failureMessage,
+            lastEventAt: new Date().toISOString(),
+          }, {
+            source: "ws.finalTranscriptBackfill.failed",
+          }).catch(() => undefined);
         }
       } catch (error) {
         this.log("Final transcript backfill error", { sessionId, error: error.message });
+        const failureMessage = String(error?.message || error || "Final transcript backfill error").slice(0, 1000);
+        this.logProcessing(sessionId, "final_stt_error", {
+          backend: result?.backend || result?.data?.metadata?.backend || null,
+          error: failureMessage,
+        });
+        await this.store.logEvent(sessionId, "final_transcript_backfill_failed", {
+          backend: result?.backend || result?.data?.metadata?.backend || null,
+          error: failureMessage,
+        }).catch(() => undefined);
+        await this.persistTransportState(sessionId, {
+          lastError: failureMessage,
+          lastEventAt: new Date().toISOString(),
+        }, {
+          source: "ws.finalTranscriptBackfill.error",
+        }).catch(() => undefined);
       }
     }
 
@@ -918,19 +996,54 @@ class LiveConversationWebSocket {
     ).trim();
 
     if (transcriptText.length < 20) {
+      this.logProcessing(sessionId, "final_draft_skipped", {
+        reason: "empty_transcript",
+        transcriptLength: transcriptText.length,
+      });
+      await this.store.logEvent(sessionId, "final_draft_backfill_skipped", {
+        reason: "empty_transcript",
+        transcriptLength: transcriptText.length,
+      }).catch(() => undefined);
       return;
     }
 
     try {
+      const draftStartedAt = Date.now();
+      this.logProcessing(sessionId, "final_draft_started", {
+        transcriptLength: transcriptText.length,
+      });
       const draft = await this.generateDraftExtraction(transcriptText, session);
       if (this.hasMeaningfulDraft(draft)) {
         await this.applyDraftAndReviewRequirements(sessionId, draft, session);
         await this.store.logEvent(sessionId, "final_draft_backfilled", {
           diagnosis: draft.diagnosis || "",
         });
+        this.logProcessing(sessionId, "final_draft_saved", {
+          elapsedMs: Date.now() - draftStartedAt,
+          hasDiagnosis: Boolean(String(draft.diagnosis || "").trim()),
+          symptomsCount: Array.isArray(draft.symptoms) ? draft.symptoms.length : 0,
+          medicationsCount: Array.isArray(draft.medications) ? draft.medications.length : 0,
+          followUpCount: Array.isArray(draft.followUp) ? draft.followUp.length : 0,
+        });
+      } else {
+        this.logProcessing(sessionId, "final_draft_skipped", {
+          reason: "empty_draft",
+          transcriptLength: transcriptText.length,
+          elapsedMs: Date.now() - draftStartedAt,
+        });
+        await this.store.logEvent(sessionId, "final_draft_backfill_skipped", {
+          reason: "empty_draft",
+          transcriptLength: transcriptText.length,
+        });
       }
     } catch (error) {
       this.log("Final draft backfill error", { sessionId, error: error.message });
+      this.logProcessing(sessionId, "final_draft_error", {
+        error: String(error?.message || error || "Final draft backfill error").slice(0, 1000),
+      });
+      await this.store.logEvent(sessionId, "final_draft_backfill_failed", {
+        error: String(error?.message || error || "Final draft backfill error").slice(0, 1000),
+      }).catch(() => undefined);
     }
   }
 
@@ -1159,47 +1272,20 @@ class LiveConversationWebSocket {
     this.chunkBuffer.set(sessionId, []);
 
     const session = await this.store.get(sessionId);
-    const normalizedMimeType = String(session?.audio?.mimeType || "").toLowerCase();
-    const isBrowserContainerFormat = this.isBrowserContainerMimeType(normalizedMimeType);
-
-    let combined;
+    const extension = this.getAudioExtension(session?.audio?.mimeType);
     const tempDir = path.join(this.storageDir, "live_conversation_temp");
     await fsp.mkdir(tempDir, { recursive: true });
 
-    const extension = this.getAudioExtension(session?.audio?.mimeType);
-    const chunkPath = path.join(tempDir, `${sessionId}-${Date.now()}${extension}`);
+    // Write current chunks as-is (no combination with previous chunks to avoid exponential growth)
+    // For WebM validity, we'll handle combination at snapshot time
+    const chunkIndex = (this.sessionChunkCount.get(sessionId) || 0) + 1;
+    this.sessionChunkCount.set(sessionId, chunkIndex);
+    const chunkPath = path.join(tempDir, `${sessionId}-${chunkIndex}-${Date.now()}${extension}`);
 
-    if (isBrowserContainerFormat) {
-      // CRITICAL FIX: For WebM/MP4, we MUST include ALL previous chunks to maintain valid container structure
-      // Each WebM chunk file must have the EBML header from the beginning
-      const existingChunkFiles = this.sessionChunkFiles.get(sessionId) || [];
-
-      // Read all previous chunk files and prepend them to maintain WebM validity
-      const previousChunks = [];
-      for (const existingPath of existingChunkFiles) {
-        try {
-          const data = await fsp.readFile(existingPath);
-          previousChunks.push(data);
-        } catch (error) {
-          console.warn(`[LiveConversationWS] Failed to read previous chunk ${existingPath}:`, error.message);
-        }
-      }
-
-      // Combine: all previous chunks + current chunks
-      const allBuffers = [...previousChunks, ...chunks.map((c) => c.buffer)];
-      combined = Buffer.concat(allBuffers);
-
-      if (combined.length < 100) {
-        console.warn(`[LiveConversationWS] Combined chunk seems too small for valid WebM: ${combined.length} bytes`);
-      }
-    } else {
-      // For non-container formats (like raw PCM in some edge cases), simple concatenation works
-      combined = Buffer.concat(chunks.map((c) => c.buffer));
-    }
-
+    const combined = Buffer.concat(chunks.map((c) => c.buffer));
     await fsp.writeFile(chunkPath, combined);
 
-    console.log(`[LiveConversationWS] Wrote chunk file: ${chunkPath}, size: ${combined.length} bytes`);
+    console.log(`[LiveConversationWS] Wrote chunk file #${chunkIndex}: ${chunkPath}, size: ${combined.length} bytes`);
 
     // Track chunk files for this session for later combination
     const chunkFiles = this.sessionChunkFiles.get(sessionId) || [];
@@ -1209,8 +1295,9 @@ class LiveConversationWebSocket {
     return chunkPath;
   }
 
-  async createStreamingAudioSnapshot(sessionId, recentChunkLimit = 0) {
+  async createStreamingAudioSnapshot(sessionId, recentChunkLimit = 0, options = {}) {
     const chunkFiles = this.sessionChunkFiles.get(sessionId) || [];
+    const lastTranscribedIndex = this.lastTranscribedChunkIndex.get(sessionId) ?? -1;
 
     // WebM is a container format (Matroska) that relies on sequential clusters and exact byte offsets.
     // We cannot simply concatenate the initialization header (chunk[0]) directly to chunk[N].
@@ -1230,11 +1317,29 @@ class LiveConversationWebSocket {
 
     let selectedChunkFiles = chunkFiles;
 
+    // FIX: Only include new chunks since the last successful transcription
+    // This prevents transcribing the same content multiple times
+    if (options.includeOnlyNewChunks && lastTranscribedIndex >= 0 && chunkFiles.length > lastTranscribedIndex + 1) {
+      if (!isBrowserContainerFormat) {
+        // For non-container formats, we can safely take only new chunks
+        selectedChunkFiles = chunkFiles.slice(lastTranscribedIndex + 1);
+        console.log(`[LiveConversationWS] Snapshot: taking ${selectedChunkFiles.length} new chunks (skipping ${lastTranscribedIndex + 1} already transcribed)`);
+      } else {
+        // For browser container formats (WebM/MP4), we must include the first chunk for the EBML header
+        // But we can skip middle chunks that were already transcribed
+        // Take chunk[0] (header) + chunks after lastTranscribedIndex
+        if (lastTranscribedIndex > 0) {
+          selectedChunkFiles = [chunkFiles[0], ...chunkFiles.slice(lastTranscribedIndex + 1)];
+          console.log(`[LiveConversationWS] Snapshot: taking ${selectedChunkFiles.length} chunks (header + ${chunkFiles.length - lastTranscribedIndex - 1} new chunks)`);
+        }
+      }
+    }
+
     // Only apply chunk limiting for non-container formats
     if (recentChunkLimit > 0 && chunkFiles.length > recentChunkLimit) {
       if (!isBrowserContainerFormat) {
         // For non-container formats (WAV, raw PCM, etc.), we can safely take recent chunks
-        selectedChunkFiles = chunkFiles.slice(-recentChunkLimit);
+        selectedChunkFiles = selectedChunkFiles.slice(-recentChunkLimit);
       }
       // For browser container formats, we MUST use all chunks - no safe way to limit
     }
@@ -1888,7 +1993,7 @@ ${transcriptText}`;
         || this.isWeakRealtimeTranscriptWindow(windowTranscript)
         )
       ) {
-        const snapshotFallbackPath = await this.createStreamingAudioSnapshot(sessionId, this.config.liveTranscriptWindowChunks);
+        const snapshotFallbackPath = await this.createStreamingAudioSnapshot(sessionId, this.config.liveTranscriptWindowChunks, { includeOnlyNewChunks: true });
         if (snapshotFallbackPath) {
           snapshotPath = snapshotFallbackPath;
           transcriptionPath = snapshotFallbackPath;
@@ -1931,6 +2036,14 @@ ${transcriptText}`;
           || windowTranscript.rawText
           || "",
         ).trim();
+
+        // FIX: Track the last successfully transcribed chunk index
+        // This ensures that future snapshots only include new chunks
+        const currentChunkIndex = this.sessionChunkCount.get(sessionId) ?? 0;
+        if (currentChunkIndex > (this.lastTranscribedChunkIndex.get(sessionId) ?? -1)) {
+          this.lastTranscribedChunkIndex.set(sessionId, currentChunkIndex);
+          this.log("Updated last transcribed chunk index", { sessionId, chunkIndex: currentChunkIndex });
+        }
         if (!this.isMeaningfulTranscriptText(currentWindowText)) return;
 
         // PR-2: Record first partial transcript latency at first successful publish
@@ -2209,6 +2322,7 @@ ${transcriptText}`;
   async handleEnd(sessionId) {
     const ws = this.sessions.get(sessionId);
     const endedAt = new Date().toISOString();
+    this.logProcessing(sessionId, "end_received");
 
     // Flush final audio chunk
     const chunkPath = await this.flushAudioBuffer(sessionId);
@@ -2231,6 +2345,11 @@ ${transcriptText}`;
 
     // Combine audio chunks immediately (fast operation)
     const combinedAudioPath = await this.combineAudioChunks(sessionId);
+    this.logProcessing(sessionId, "final_audio_prepared", {
+      mimeType,
+      durationMs: finalDurationMs,
+      chunkAudioFile: combinedAudioPath ? path.basename(combinedAudioPath) : null,
+    });
 
     // CRITICAL FIX: Send session.state: review_required IMMEDIATELY
     // This prevents frontend timeout while we process transcription in background
@@ -2252,11 +2371,20 @@ ${transcriptText}`;
       status: "review_required",
       timestamp: new Date().toISOString(),
     });
+    this.logProcessing(sessionId, "review_state_sent", {
+      status: "review_required",
+    });
 
     // Process final transcript and draft in background (don't block the response)
     void (async () => {
       try {
-        const uploadedFinalAudioPath = await this.waitForFinalUploadedAudioAsset(sessionId, 5000);
+        const normalizedFinalMimeType = String(mimeType || "").toLowerCase();
+        const shouldWaitForUploadedFinalAudio = !combinedAudioPath
+          || normalizedFinalMimeType.includes("webm")
+          || normalizedFinalMimeType.includes("ogg");
+        const uploadedFinalAudioPath = shouldWaitForUploadedFinalAudio
+          ? await this.waitForFinalUploadedAudioAsset(sessionId, 5000)
+          : null;
         const refreshedSession = await this.store.get(sessionId);
         const persistedUploadedAudioPath = refreshedSession?.audio?.combinedPath
           ? path.resolve(refreshedSession.audio.combinedPath)
@@ -2276,6 +2404,16 @@ ${transcriptText}`;
         const backfillAudioPath = shouldSkipUnsafeChunkBackfill
           ? null
           : (resolvedUploadedFinalAudioPath || combinedAudioPath);
+        this.logProcessing(sessionId, "final_backfill_audio_selected", {
+          source: resolvedUploadedFinalAudioPath
+            ? "final_upload_or_persisted_audio"
+            : combinedAudioPath
+              ? "websocket_chunk_audio"
+              : "none",
+          audioFile: backfillAudioPath ? path.basename(backfillAudioPath) : null,
+          expectedDurationMs,
+          waitedForFinalUpload: shouldWaitForUploadedFinalAudio,
+        });
 
         if (shouldSkipUnsafeChunkBackfill) {
           this.log("Skipping final transcript backfill because no audio path was available", {
@@ -2283,6 +2421,14 @@ ${transcriptText}`;
             mimeType,
             combinedAudioPath,
           });
+          this.logProcessing(sessionId, "final_transcript_skipped", {
+            reason: "unsafe_browser_chunks_without_final_upload",
+            mimeType,
+          });
+          await this.store.logEvent(sessionId, "final_transcript_backfill_skipped", {
+            reason: "unsafe_browser_chunks_without_final_upload",
+            mimeType,
+          }).catch(() => undefined);
         }
 
         await this.backfillFinalTranscriptAndDraft(sessionId, backfillAudioPath, {
@@ -2290,8 +2436,12 @@ ${transcriptText}`;
         });
 
         await this.store.logEvent(sessionId, "session_ended");
+        this.logProcessing(sessionId, "session_end_processing_done");
       } catch (error) {
         this.log("Background session end processing error", { sessionId, error: error.message });
+        this.logProcessing(sessionId, "session_end_processing_error", {
+          error: String(error?.message || error || "Background session end processing error").slice(0, 1000),
+        });
       }
     })();
 
@@ -2321,8 +2471,10 @@ ${transcriptText}`;
     this.chunkBuffer.delete(sessionId);
     this.transcriptBuffer.delete(sessionId);
     this.draftBuffer.delete(sessionId);
+    this.sessionChunkCount.delete(sessionId);
     this.transcriptionQueues.delete(sessionId);
     this.transcriptMetrics.delete(sessionId);
+    this.lastTranscribedChunkIndex.delete(sessionId);
     this.draftInFlight.delete(sessionId);
 
     // Clear the chunk flush timer
@@ -2564,6 +2716,7 @@ ${transcriptText}`;
       clearInterval(timer);
     }
     this.chunkFlushTimers.clear();
+    this.sessionChunkCount.clear();
     this.transcriptionQueues.clear();
     this.draftInFlight.clear();
 
