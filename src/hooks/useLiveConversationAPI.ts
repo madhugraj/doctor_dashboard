@@ -886,6 +886,20 @@ function hasPostEndBackfillSignal(session: LiveConversationSession | undefined |
     || session.status === "failed";
 }
 
+function resolveSelectedEncounterPhase(
+  session: LiveConversationSession,
+  captureState: LiveCaptureState,
+  transportState: LiveConnectionState,
+): LiveEncounterPhase {
+  const phase = deriveCanonicalEncounterPhase(session.status, captureState, transportState);
+
+  if (phase === "review_ready" && session.status === "review_required" && !hasPostEndBackfillSignal(session)) {
+    return "transcribing";
+  }
+
+  return phase;
+}
+
 function wait(ms: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
@@ -1069,7 +1083,7 @@ export function useLiveConversationAPI() {
 
   // Derive canonical phase for the selected session
   const selectedSessionPhase = selectedSession
-    ? deriveCanonicalEncounterPhase(selectedSession.status, audio.recorderState, audio.connectionState)
+    ? resolveSelectedEncounterPhase(selectedSession, audio.recorderState, audio.connectionState)
     : "draft_ready";
 
   const resolveRecorderState = useCallback((currentRecorder?: LiveConversationSession["recorder"]) => {
